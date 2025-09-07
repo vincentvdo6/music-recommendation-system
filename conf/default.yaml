@@ -1,0 +1,76 @@
+database:
+  url: "${DATABASE_URL:postgresql://music_user:music_pass@localhost:5432/music_rec}"
+  pool_size: 20
+  max_overflow: 30
+  pool_timeout: 30
+  echo: false
+
+redis:
+  url: "${REDIS_URL:redis://localhost:6379/0}"
+  max_connections: 100
+  socket_timeout: 5
+  socket_connect_timeout: 5
+
+storage:
+  endpoint: "${MINIO_ENDPOINT:localhost:9000}"
+  access_key: "${MINIO_ACCESS_KEY:minioadmin}"
+  secret_key: "${MINIO_SECRET_KEY:minioadmin}"
+  secure: false
+  bucket_embeddings: "embeddings"
+  bucket_raw_audio: "raw-audio"
+  bucket_previews: "previews"
+  bucket_models: "models"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  log_level: "info"
+  cors_origins: []
+  jwt_secret: "${JWT_SECRET:dev-secret-key}"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 1440
+
+ann:
+  default_k: 200
+  rerank_k: 200
+  index_path: "data/indexes"
+  recall_threshold: 0.92
+  
+embeddings:
+  models:
+    mert:
+      version: "v2"
+      batch_size: 32
+      device: "cpu"
+    clmr:
+      version: "v1"
+      batch_size: 16
+      device: "cpu"
+  preview_adapter:
+    enabled: false
+    model_path: "models/preview_adapter.bin"
+  fallback:
+    enabled: true
+
+ranker:
+  model_path: "models/xgb_ranker.bin"
+  feature_cache_ttl: 60
+  batch_size: 200
+
+diversity:
+  mmr_lambda: 0.7
+  flow:
+    tempo_weight: 0.3
+    energy_weight: 0.2
+    key_weight: 0.5
+
+consent:
+  max_preview_duration: 30
+  default_retention_days: 90
+  salt: "${CONSENT_SALT:dev-salt}"
+  kms_key_id: "${KMS_KEY_ID:}"
+
+metrics:
+  prometheus_port: 9090
+  log_format: "json"
