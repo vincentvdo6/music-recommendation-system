@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>One‑Rec — Single Purpose Music Recommendation</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0a0a0a;
+      color: #f5f5f5;
+      min-height: 100vh;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header-content {
+      max-width: 768px;
+      margin: 0 auto;
+      padding: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #6366f1, #d946ef);
+    }
+
+    .logo-text {
+      font-size: 1.125rem;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+    }
+
+    .tagline {
+      font-size: 0.75rem;
+      color: #a3a3a3;
+      display: none;
+    }
+
+    @media (min-width: 640px) {
+      .tagline {
+        display: block;
+      }
+    }
+
+    /* Main content */
+    .main {
+      max-width: 768px;
+      margin: 0 auto;
+      padding: 2.5rem 1rem;
+    }
+
+    /* Hero section */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 1rem;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(23,23,23,0.5);
+      padding: 1.5rem;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.04);
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -128px;
+      right: -96px;
+      width: 256px;
+      height: 256px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(217,70,239,0.2));
+      filter: blur(48px);
+      pointer-events: none;
+      opacity: 0.4;
+    }
+
+    .hero h1 {
+      font-size: 1.875rem;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero p {
+      margin-top: 0.5rem;
+      font-size: 0.875rem;
+      color: #a3a3a3;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero em {
+      font-style: italic;
+    }
+
+    /* Form */
+    .search-form {
+      margin-top: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    @media (min-width: 640px) {
+      .search-form {
+        flex-direction: row;
+      }
+    }
+
+    .search-input {
+      flex: 1;
+      border-radius: 12px;
+      background: rgba(10,10,10,0.8);
+      padding: 0.75rem 1rem;
+      outline: none;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #f5f5f5;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: rgba(99,102,241,0.6);
+      box-shadow: 0 0 0 2px rgba(99,102,241,0.2);
+    }
+
+    .search-input::placeholder {
+      color: #737373;
+    }
+
+    .search-btn {
+      border-radius: 12px;
+      padding: 0.75rem 1.25rem;
+      font-weight: 500;
+      background: #f5f5f5;
+      color: #0a0a0a;
+      border: 1px solid rgba(255,255,255,0.1);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .search-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .search-btn:not(:disabled):hover {
+      filter: brightness(0.95);
+    }
+
+    /* Examples */
+    .examples {
+      margin-top: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: #a3a3a3;
+      position: relative;
+      z-index: 1;
+    }
+
+    .example-btn {
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 0.25rem 0.75rem;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .example-btn:hover {
+      background: rgba(255,255,255,0.05);
+    }
+
+    /* Results */
+    .result-section {
+      margin-top: 2rem;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      border-radius: 1rem;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(23,23,23,0.5);
+      padding: 1.5rem;
+    }
+
+    @media (min-width: 768px) {
+      .result-section {
+        grid-template-columns: 2fr 3fr;
+      }
+    }
+
+    /* Input summary */
+    .input-summary {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.875rem;
+      color: #a3a3a3;
+    }
+
+    .input-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 0.25rem 0.75rem;
+    }
+
+    .input-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #6366f1;
+    }
+
+    .source-link {
+      text-decoration: none;
+      color: inherit;
+      text-decoration-offset: 2px;
+    }
+
+    .source-link:hover {
+      text-decoration: underline;
+    }
+
+    /* Recommendation card */
+    .rec-card {
+      border-radius: 12px;
+      background: rgba(10,10,10,0.6);
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 1rem;
+    }
+
+    .artwork {
+      aspect-ratio: 1;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 8px;
+    }
+
+    .artwork img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .track-info {
+      margin-top: 1rem;
+    }
+
+    .track-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .track-artist {
+      color: #a3a3a3;
+      margin-top: 0.25rem;
+    }
+
+    .tags {
+      margin-top: 0.75rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .tag {
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 0.25rem 0.625rem;
+      font-size: 0.75rem;
+      color: #d4d4d4;
+    }
+
+    .tag-label {
+      color: #737373;
+      margin-right: 0.25rem;
+    }
+
+    /* Similarity */
+    .similarity {
+      margin-top: 1rem;
+    }
+
+    .similarity-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: #a3a3a3;
+    }
+
+    .similarity-score {
+      font-weight: 500;
+      color: #e5e5e5;
+    }
+
+    .similarity-bar {
+      margin-top: 0.25rem;
+      height: 8px;
+      width: 100%;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.1);
+      overflow: hidden;
+    }
+
+    .similarity-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #6366f1, #d946ef);
+    }
+
+    /* Controls */
+    .controls {
+      margin-top: 1rem;
+    }
+
+    .audio-player {
+      width: 100%;
+      margin-bottom: 0.5rem;
+    }
+
+    .cta-buttons {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .cta-btn {
+      flex: 1;
+      border-radius: 12px;
+      padding: 0.5rem 1rem;
+      text-align: center;
+      font-weight: 500;
+      text-decoration: none;
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: all 0.2s;
+    }
+
+    .cta-btn.primary {
+      background: #f5f5f5;
+      color: #0a0a0a;
+    }
+
+    .cta-btn.secondary {
+      background: #e5e5e5;
+      color: #171717;
+    }
+
+    .cta-btn:hover {
+      filter: brightness(0.95);
+    }
+
+    /* Explanation */
+    .explanation {
+      border-radius: 12px;
+      background: rgba(10,10,10,0.6);
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 1rem;
+    }
+
+    .explanation-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .explanation-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #d946ef;
+    }
+
+    .explanation-title {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #d4d4d4;
+    }
+
+    .reasons {
+      margin-top: 0.75rem;
+      list-style: none;
+    }
+
+    .reason {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      line-height: 1.4;
+      color: #d4d4d4;
+    }
+
+    .reason-dot {
+      margin-top: 0.375rem;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #a3a3a3;
+      flex-shrink: 0;
+    }
+
+    .note {
+      margin-top: 1.5rem;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(23,23,23,0.5);
+      padding: 0.75rem;
+      font-size: 0.75rem;
+      color: #a3a3a3;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 2.5rem;
+      padding-bottom: 2rem;
+      text-align: center;
+      font-size: 0.75rem;
+      color: #737373;
+    }
+
+    /* Loading states */
+    .loading {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    /* Live search suggestions */
+    .suggestions {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: rgba(10,10,10,0.95);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      margin-top: 0.25rem;
+      z-index: 20;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .suggestion {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .suggestion:last-child {
+      border-bottom: none;
+    }
+
+    .suggestion:hover,
+    .suggestion.active {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .suggestion img {
+      width: 40px;
+      height: 40px;
+      border-radius: 6px;
+      object-fit: cover;
+    }
+
+    .suggestion-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .suggestion-title {
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .suggestion-artist {
+      font-size: 0.875rem;
+      color: #a3a3a3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-content">
+      <div class="logo">
+        <div class="logo-icon"></div>
+        <div class="logo-text">One‑Rec</div>
+      </div>
+      <p class="tagline">Paste a song. Get one perfect recommendation.</p>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Hero / Input -->
+    <section class="hero">
+      <h1>One input. One recommendation.</h1>
+      <p>
+        Search for any song and get <em>the</em> best next listen.
+        No lists, no feeds, no rabbit holes — just one perfect match.
+      </p>
+
+      <form class="search-form" id="searchForm">
+        <div style="position: relative; flex: 1;">
+          <input
+            class="search-input"
+            id="songInput"
+            type="text"
+            placeholder="Search for a song... e.g., 'Ivy Frank Ocean'"
+            autocomplete="off"
+          />
+          <div class="suggestions hidden" id="suggestions"></div>
+        </div>
+        <button type="submit" class="search-btn" id="searchBtn">
+          Get recommendation
+        </button>
+      </form>
+
+      <div class="examples">
+        <span>Try:</span>
+        <button type="button" class="example-btn" data-example="Ivy Frank Ocean">Ivy — Frank Ocean</button>
+        <button type="button" class="example-btn" data-example="Blinding Lights The Weeknd">Blinding Lights</button>
+        <button type="button" class="example-btn" data-example="drivers license olivia rodrigo">drivers license</button>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section class="result-section hidden" id="resultSection">
+      <div class="input-summary">
+        <span class="input-badge">
+          <span class="input-dot"></span>
+          Input: <span id="inputSummary">—</span>
+        </span>
+      </div>
+
+      <!-- Recommendation card -->
+      <div class="rec-card">
+        <div class="artwork">
+          <img id="recArtwork" src="" alt="Album artwork" />
+        </div>
+        <div class="track-info">
+          <h2 class="track-title" id="recTitle">—</h2>
+          <p class="track-artist" id="recArtist">—</p>
+          <div class="tags" id="recTags"></div>
+          
+          <div class="similarity">
+            <div class="similarity-header">
+              <span>Similarity</span>
+              <span class="similarity-score" id="similarityScore">—%</span>
+            </div>
+            <div class="similarity-bar">
+              <div class="similarity-fill" id="similarityFill" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="controls">
+            <audio class="audio-player" id="audioPlayer" controls style="display: none;">
+              <source id="audioSource" src="" type="audio/mpeg">
+              Your browser does not support audio playback.
+            </audio>
+            <div class="cta-buttons">
+              <a class="cta-btn primary" id="spotifyLink" href="#" target="_blank">
+                Open in Spotify
+              </a>
+              <a class="cta-btn secondary" href="#" target="_blank">
+                Search Apple Music
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Explanation -->
+      <div class="explanation">
+        <div class="explanation-header">
+          <div class="explanation-dot"></div>
+          <h3 class="explanation-title">Why this match</h3>
+        </div>
+        <ul class="reasons" id="reasons"></ul>
+
+        <div class="note">
+          <p>
+            We show exactly one recommendation per input. Try a different song to
+            explore new directions.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>One-purpose music discovery. No accounts, no feeds — just one great next song.</p>
+    </footer>
+  </main>
+
+  <script>
+    const API_BASE = 'http://localhost:8000';
+    let debounceTimeout = null;
+    let activeIndex = -1;
+    let currentController = null;
+    const searchCache = new Map();
+    const CACHE_TTL_MS = 60 * 1000;
+
+    // Elements
+    const songInput = document.getElementById('songInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchForm = document.getElementById('searchForm');
+    const suggestions = document.getElementById('suggestions');
+    const resultSection = document.getElementById('resultSection');
+    const inputSummary = document.getElementById('inputSummary');
+    const recArtwork = document.getElementById('recArtwork');
+    const recTitle = document.getElementById('recTitle');
+    const recArtist = document.getElementById('recArtist');
+    const recTags = document.getElementById('recTags');
+    const similarityScore = document.getElementById('similarityScore');
+    const similarityFill = document.getElementById('similarityFill');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const audioSource = document.getElementById('audioSource');
+    const spotifyLink = document.getElementById('spotifyLink');
+    const reasons = document.getElementById('reasons');
+
+    // Utility functions
+    function debounce(fn, ms) {
+      return function(...args) {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => fn.apply(this, args), ms);
+      };
+    }
+
+    function getCachedResult(key) {
+      const hit = searchCache.get(key);
+      if (!hit) return null;
+      if (Date.now() - hit.timestamp > CACHE_TTL_MS) {
+        searchCache.delete(key);
+        return null;
+      }
+      return hit.data;
+    }
+
+    function setCachedResult(key, data) {
+      if (searchCache.size > 30) {
+        const firstKey = searchCache.keys().next().value;
+        searchCache.delete(firstKey);
+      }
+      searchCache.set(key, { data, timestamp: Date.now() });
+    }
+
+    function showSuggestions() {
+      suggestions.classList.remove('hidden');
+    }
+
+    function hideSuggestions() {
+      suggestions.classList.add('hidden');
+      activeIndex = -1;
+    }
+
+    // Live search suggestions
+    const performLiveSearch = debounce(async (query) => {
+      const cacheKey = query.toLowerCase().trim();
+      
+      if (cacheKey.length < 2) {
+        hideSuggestions();
+        return;
+      }
+
+      // Serve from cache immediately if available
+      const cached = getCachedResult(cacheKey);
+      if (cached) {
+        renderSuggestions(cached);
+      }
+
+      // Cancel previous request
+      if (currentController) {
+        currentController.abort();
+      }
+      currentController = new AbortController();
+
+      try {
+        // Show loading only if no cached result
+        if (!cached) {
+          suggestions.innerHTML = '<div class="suggestion" style="justify-content:center;color:#737373;">🔍 Searching...</div>';
+          showSuggestions();
+        }
+
+        const response = await fetch(
+          `${API_BASE}/api/v1/search?q=${encodeURIComponent(query)}&limit=5`,
+          { signal: currentController.signal }
+        );
+
+        if (!response.ok) {
+          if (!cached) hideSuggestions();
+          return;
+        }
+
+        const data = await response.json();
+        const tracks = data.tracks || [];
+
+        // Cache the fresh result
+        setCachedResult(cacheKey, tracks);
+
+        // Only render if this request wasn't superseded
+        if (!currentController.signal.aborted) {
+          renderSuggestions(tracks);
+        }
+
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        
+        // Only hide suggestions if no cached fallback
+        if (!cached) {
+          hideSuggestions();
+        }
+      }
+    }, 120);
+
+    function renderSuggestions(tracks) {
+      if (!tracks.length) {
+        hideSuggestions();
+        return;
+      }
+
+      suggestions.innerHTML = '';
+      tracks.forEach((track, index) => {
+        const div = document.createElement('div');
+        div.className = 'suggestion';
+        div.dataset.index = index;
+        
+        const img = document.createElement('img');
+        img.src = track.image_url || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjMjYyNjI2Ii8+CjxwYXRoIGQ9Ik0yMCAzMEMyNS41MjI5IDMwIDMwIDI1LjUyMjkgMzAgMjBDMzAgMTQuNDc3MSAyNS41MjI5IDEwIDIwIDEwQzE0LjQ3NzEgMTAgMTAgMTQuNDc3MSAxMCAyMEMxMCAyNS41MjI5IDE0LjQ3NzEgMzAgMjAgMzBaIiBzdHJva2U9IiM3Mzc0NzMiIHN0cm9rZS13aWR0aD0iMiIvPgo8cGF0aCBkPSJNMjMgMTdMMjEgMTlMMjMgMjEiIHN0cm9rZT0iIzczNzQ3MyIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+';
+        img.alt = `${track.name} artwork`;
+        img.onerror = () => img.style.display = 'none';
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'suggestion-info';
+        
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'suggestion-title';
+        titleDiv.textContent = track.name || 'Unknown';
+        
+        const artistDiv = document.createElement('div');
+        artistDiv.className = 'suggestion-artist';
+        artistDiv.textContent = track.artist || 'Unknown Artist';
+        
+        infoDiv.appendChild(titleDiv);
+        infoDiv.appendChild(artistDiv);
+        
+        div.appendChild(img);
+        div.appendChild(infoDiv);
+        
+        div.addEventListener('click', () => {
+          songInput.value = `${track.name} ${track.artist}`;
+          hideSuggestions();
+          handleRecommendation(track);
+        });
+        
+        suggestions.appendChild(div);
+      });
+
+      showSuggestions();
+    }
+
+    // Event listeners
+    songInput.addEventListener('input', (e) => {
+      performLiveSearch(e.target.value.trim());
+    });
+
+    songInput.addEventListener('keydown', (e) => {
+      const suggestionItems = suggestions.querySelectorAll('.suggestion');
+      
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIndex = Math.min(activeIndex + 1, suggestionItems.length - 1);
+        updateActiveSelection();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIndex = Math.max(activeIndex - 1, -1);
+        updateActiveSelection();
+      } else if (e.key === 'Enter' && activeIndex >= 0) {
+        e.preventDefault();
+        suggestionItems[activeIndex].click();
+      } else if (e.key === 'Escape') {
+        hideSuggestions();
+      }
+    });
+
+    songInput.addEventListener('focus', () => {
+      if (songInput.value.trim()) {
+        performLiveSearch(songInput.value.trim());
+      }
+    });
+
+    songInput.addEventListener('blur', () => {
+      setTimeout(hideSuggestions, 150);
+    });
+
+    function updateActiveSelection() {
+      const suggestionItems = suggestions.querySelectorAll('.suggestion');
+      suggestionItems.forEach((item, index) => {
+        item.classList.toggle('active', index === activeIndex);
+      });
+    }
+
+    // Example buttons
+    document.addEventListener('click', (e) => {
+      if (e.target.matches('.example-btn')) {
+        songInput.value = e.target.dataset.example;
+        hideSuggestions();
+        performSearch();
+      }
+    });
+
+    // Form submission
+    searchForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      performSearch();
+    });
+
+    async function performSearch() {
+      const query = songInput.value.trim();
+      if (!query) return;
+
+      try {
+        searchBtn.textContent = 'Finding…';
+        searchBtn.disabled = true;
+
+        // First get search results
+        const searchResponse = await fetch(`${API_BASE}/api/v1/search?q=${encodeURIComponent(query)}&limit=1`);
+        const searchData = await searchResponse.json();
+        
+        if (!searchData.tracks || !searchData.tracks[0]) {
+          throw new Error('No tracks found');
+        }
+
+        const track = searchData.tracks[0];
+        await handleRecommendation(track);
+
+      } catch (error) {
+        console.error('Search failed:', error);
+        alert('Search failed. Please try again.');
+      } finally {
+        searchBtn.textContent = 'Get recommendation';
+        searchBtn.disabled = false;
+      }
+    }
+
+    async function handleRecommendation(inputTrack) {
+      try {
+        hideSuggestions();
+        
+        // Get recommendation based on the input track
+        const recResponse = await fetch(`${API_BASE}/api/v1/recommendations?seed=${encodeURIComponent(inputTrack.uri || inputTrack.id)}&limit=1`);
+        const recData = await recResponse.json();
+        
+        if (!recData.recommendations || !recData.recommendations[0]) {
+          throw new Error('No recommendations found');
+        }
+
+        const recommendation = recData.recommendations[0];
+        
+        // Update UI
+        inputSummary.textContent = `${inputTrack.name} — ${inputTrack.artist}`;
+        recTitle.textContent = recommendation.name;
+        recArtist.textContent = recommendation.artist;
+        recArtwork.src = recommendation.image_url || recArtwork.src;
+        
+        // Tags
+        recTags.innerHTML = '';
+        const tags = [
+          { label: 'Album', value: recommendation.album },
+          { label: 'Popularity', value: `${recommendation.popularity}%` },
+          { label: 'Year', value: new Date(recommendation.release_date || Date.now()).getFullYear() }
+        ].filter(tag => tag.value && tag.value !== 'undefined%');
+        
+        tags.forEach(tag => {
+          const tagEl = document.createElement('span');
+          tagEl.className = 'tag';
+          tagEl.innerHTML = `<span class="tag-label">${tag.label}:</span>${tag.value}`;
+          recTags.appendChild(tagEl);
+        });
+
+        // Similarity (mock calculation based on popularity)
+        const similarity = Math.min(95, Math.max(75, recommendation.similarity_score * 100 || (85 + Math.random() * 10)));
+        similarityScore.textContent = `${Math.round(similarity)}%`;
+        similarityFill.style.width = `${similarity}%`;
+
+        // Audio preview
+        if (recommendation.preview_url) {
+          audioSource.src = recommendation.preview_url;
+          audioPlayer.load();
+          audioPlayer.style.display = 'block';
+        } else {
+          audioPlayer.style.display = 'none';
+        }
+
+        // Spotify link
+        spotifyLink.href = recommendation.external_urls?.spotify || `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
+
+        // Reasons (mock intelligent reasons)
+        const reasonsList = recommendation.explanation?.top_factors || [
+          `Similar ${getGenreDescription(recommendation)} style and production`,
+          `Matching tempo and energy levels create seamless flow`,
+          `Both artists share ${getArtisticConnection(inputTrack.artist, recommendation.artist)}`
+        ];
+
+        reasons.innerHTML = '';
+        reasonsList.slice(0, 3).forEach(reason => {
+          const li = document.createElement('li');
+          li.className = 'reason';
+          li.innerHTML = `
+            <span class="reason-dot"></span>
+            <span>${reason}</span>
+          `;
+          reasons.appendChild(li);
+        });
+
+        // Show results
+        resultSection.classList.remove('hidden');
+        resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      } catch (error) {
+        console.error('Recommendation failed:', error);
+        alert('Could not get recommendation. Please try again.');
+      }
+    }
+
+    // Helper functions for mock reasons
+    function getGenreDescription(track) {
+      const genres = ['indie', 'pop', 'electronic', 'alternative', 'R&B', 'hip-hop'];
+      return genres[Math.floor(Math.random() * genres.length)];
+    }
+
+    function getArtisticConnection(artist1, artist2) {
+      const connections = ['melodic sensibilities', 'vocal techniques', 'lyrical themes', 'production approaches', 'artistic influences'];
+      return connections[Math.floor(Math.random() * connections.length)];
+    }
+
+    // Health check on load
+    window.addEventListener('load', async () => {
+      try {
+        await fetch(`${API_BASE}/api/v1/search?q=test&limit=1`);
+      } catch (error) {
+        console.warn('API health check failed:', error);
+      }
+    });
+  </script>
+</body>
+</html>
