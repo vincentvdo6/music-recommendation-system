@@ -414,27 +414,129 @@
       color: #d4d4d4;
     }
 
-    .reasons {
-      margin-top: 0.75rem;
-      list-style: none;
+    .play-preview {
+      background: #1a1a1a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      border: 1px solid #2a2a2a;
     }
 
-    .reason {
+    .play-header {
       display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.5rem;
-      font-size: 0.875rem;
-      line-height: 1.4;
-      color: #d4d4d4;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
     }
 
-    .reason-dot {
-      margin-top: 0.375rem;
-      width: 6px;
-      height: 6px;
+    .play-dot {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background: #a3a3a3;
+      background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
       flex-shrink: 0;
+    }
+
+    .play-title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .player-controls {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      background: #262626;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .play-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      color: #000;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .play-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 20px rgba(29, 185, 84, 0.3);
+    }
+
+    .play-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .track-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .track-preview-title {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #ffffff;
+      margin-bottom: 0.25rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-duration {
+      font-size: 0.75rem;
+      color: #a3a3a3;
+    }
+
+    .volume-control {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+
+    .volume-icon {
+      font-size: 16px;
+      color: #a3a3a3;
+    }
+
+    .volume-slider {
+      width: 80px;
+      height: 4px;
+      background: #404040;
+      outline: none;
+      border-radius: 2px;
+      -webkit-appearance: none;
+    }
+
+    .volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: #1db954;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .volume-slider::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: #1db954;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
     }
 
     .note {
@@ -605,10 +707,6 @@
           </div>
 
           <div class="controls">
-            <audio class="audio-player" id="audioPlayer" controls style="display: none;">
-              <source id="audioSource" src="" type="audio/mpeg">
-              Your browser does not support audio playback.
-            </audio>
             <div class="cta-buttons">
               <a class="cta-btn primary" id="spotifyLink" href="#" target="_blank">
                 Open in Spotify
@@ -622,17 +720,33 @@
       </div>
 
       <!-- Explanation -->
-      <div class="explanation">
-        <div class="explanation-header">
-          <div class="explanation-dot"></div>
-          <h3 class="explanation-title">Why this match</h3>
+      <div class="play-preview">
+        <div class="play-header">
+          <div class="play-dot"></div>
+          <h3 class="play-title">Preview Track</h3>
         </div>
-        <ul class="reasons" id="reasons"></ul>
+
+        <div class="player-controls" id="playerControls">
+          <button class="play-btn" id="playBtn">
+            <span class="play-icon">▶</span>
+            <span class="pause-icon" style="display: none;">⏸</span>
+          </button>
+          <div class="track-info">
+            <div class="track-preview-title" id="previewTitle">Click to preview</div>
+            <div class="track-duration" id="trackDuration">0:30</div>
+          </div>
+          <div class="volume-control">
+            <span class="volume-icon">🔊</span>
+            <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="50">
+          </div>
+        </div>
+
+        <audio id="audioPlayer" preload="none"></audio>
 
         <div class="note">
           <p>
-            We show exactly one recommendation per input. Try a different song to
-            explore new directions.
+            Listen to a 30-second preview to see if you like this recommendation.
+            Not all tracks have previews available.
           </p>
         </div>
       </div>
@@ -664,14 +778,9 @@
       container.appendChild(tagEl);
     }
 
-    function renderReason(container, reason) {
-      const li = el('li', 'reason');
-      const dot = el('span', 'reason-dot');
-      const text = el('span', '', reason);
-      li.appendChild(dot);
-      li.appendChild(text);
-      container.appendChild(li);
-    }
+    // Audio player functionality
+    let isPlaying = false;
+    let currentAudio = null;
 
     // Safe API helper
     async function apiGet(path) {
@@ -702,9 +811,13 @@
     const similarityScore = document.getElementById('similarityScore');
     const similarityFill = document.getElementById('similarityFill');
     const audioPlayer = document.getElementById('audioPlayer');
-    const audioSource = document.getElementById('audioSource');
     const spotifyLink = document.getElementById('spotifyLink');
-    const reasons = document.getElementById('reasons');
+    const playBtn = document.getElementById('playBtn');
+    const previewTitle = document.getElementById('previewTitle');
+    const trackDuration = document.getElementById('trackDuration');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const playIcon = playBtn.querySelector('.play-icon');
+    const pauseIcon = playBtn.querySelector('.pause-icon');
 
     // Utility functions
     function debounce(fn, ms) {
@@ -730,6 +843,51 @@
         searchCache.delete(firstKey);
       }
       searchCache.set(key, { data, timestamp: Date.now() });
+    }
+
+    // Audio player functions
+    function initializeAudioPlayer(previewUrl, trackName) {
+      if (previewUrl) {
+        audioPlayer.src = previewUrl;
+        previewTitle.textContent = `Preview: ${trackName}`;
+        playBtn.disabled = false;
+        trackDuration.textContent = '0:30';
+      } else {
+        audioPlayer.src = '';
+        previewTitle.textContent = 'No preview available';
+        playBtn.disabled = true;
+        trackDuration.textContent = '--';
+        resetPlayButton();
+      }
+    }
+
+    function togglePlay() {
+      if (!audioPlayer.src) return;
+
+      if (isPlaying) {
+        audioPlayer.pause();
+      } else {
+        audioPlayer.play().catch(e => {
+          console.warn('Playback failed:', e);
+          previewTitle.textContent = 'Playback not available';
+        });
+      }
+    }
+
+    function resetPlayButton() {
+      isPlaying = false;
+      playIcon.style.display = 'inline';
+      pauseIcon.style.display = 'none';
+    }
+
+    function updatePlayButton() {
+      if (isPlaying) {
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'inline';
+      } else {
+        playIcon.style.display = 'inline';
+        pauseIcon.style.display = 'none';
+      }
     }
 
     function showSuggestions() {
@@ -892,6 +1050,31 @@
       });
     }
 
+    // Audio player event listeners
+    playBtn.addEventListener('click', togglePlay);
+
+    audioPlayer.addEventListener('play', () => {
+      isPlaying = true;
+      updatePlayButton();
+    });
+
+    audioPlayer.addEventListener('pause', () => {
+      isPlaying = false;
+      updatePlayButton();
+    });
+
+    audioPlayer.addEventListener('ended', () => {
+      isPlaying = false;
+      updatePlayButton();
+    });
+
+    volumeSlider.addEventListener('input', (e) => {
+      audioPlayer.volume = e.target.value / 100;
+    });
+
+    // Set initial volume
+    audioPlayer.volume = volumeSlider.value / 100;
+
     // Example buttons
     document.addEventListener('click', (e) => {
       if (e.target.matches('.example-btn')) {
@@ -970,29 +1153,11 @@
         similarityScore.textContent = `${Math.round(similarity)}%`;
         similarityFill.style.width = `${similarity}%`;
 
-        // Audio preview
-        if (recommendation.preview_url) {
-          audioSource.src = recommendation.preview_url;
-          audioPlayer.load();
-          audioPlayer.style.display = 'block';
-        } else {
-          audioPlayer.style.display = 'none';
-        }
+        // Initialize audio player
+        initializeAudioPlayer(recommendation.preview_url, recommendation.name);
 
         // Spotify link
         spotifyLink.href = recommendation.external_urls?.spotify || `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
-
-        // Reasons (mock intelligent reasons)
-        const reasonsList = recommendation.explanation?.top_factors || [
-          `Similar ${getGenreDescription(recommendation)} style and production`,
-          `Matching tempo and energy levels create seamless flow`,
-          `Both artists share ${getArtisticConnection(inputTrack.artist, recommendation.artist)}`
-        ];
-
-        reasons.textContent = '';
-        reasonsList.slice(0, 3).forEach(reason => {
-          renderReason(reasons, reason);
-        });
 
         // Show results
         resultSection.classList.remove('hidden');
@@ -1004,16 +1169,6 @@
       }
     }
 
-    // Helper functions for mock reasons
-    function getGenreDescription(track) {
-      const genres = ['indie', 'pop', 'electronic', 'alternative', 'R&B', 'hip-hop'];
-      return genres[Math.floor(Math.random() * genres.length)];
-    }
-
-    function getArtisticConnection(artist1, artist2) {
-      const connections = ['melodic sensibilities', 'vocal techniques', 'lyrical themes', 'production approaches', 'artistic influences'];
-      return connections[Math.floor(Math.random() * connections.length)];
-    }
 
     // Health check on load
     window.addEventListener('load', async () => {

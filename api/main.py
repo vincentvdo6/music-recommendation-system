@@ -102,7 +102,7 @@ async def security_headers(request: Request, call_next):
     # Content Security Policy (temporary inline allowed for existing script)
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' https: data:; "
+        "img-src 'self' https: data: *.scdn.co; "
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self';"
