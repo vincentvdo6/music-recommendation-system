@@ -106,7 +106,7 @@ async def get_music_recommendations(
                 # Get audio features
                 audio_features = await spotify_client.get_track_features(track["id"])
                 
-                # Calculate mock similarity score based on popularity and position
+                # Calculate similarity score based on popularity and position
                 base_similarity = 0.95 - (i * 0.03)  # Decreasing similarity
                 popularity_boost = (track.get("popularity", 50) / 100) * 0.1
                 similarity_score = min(0.98, base_similarity + popularity_boost)

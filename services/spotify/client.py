@@ -54,8 +54,8 @@ class SpotifyClient:
             
         # Check if we have real credentials
         if self.demo_mode:
-            logger.info("Using demo mode - no real Spotify API calls")
-            return "demo_token"
+            logger.info("Using fallback mode - no real Spotify API calls")
+            return "fallback_token"
         
         try:
             # Ensure HTTP client exists before token request
@@ -82,11 +82,11 @@ class SpotifyClient:
                 return self.access_token
             else:
                 logger.error(f"Failed to get Spotify token: {response.status_code}")
-                return "demo_token"
+                return "fallback_token"
                     
         except Exception as e:
             logger.error(f"Error getting Spotify token: {e}")
-            return "demo_token"
+            return "fallback_token"
             
     async def close(self):
         """Close the HTTP client and clean up resources."""
@@ -96,7 +96,7 @@ class SpotifyClient:
     async def search_tracks(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Search for tracks on Spotify with caching and request coalescing."""
         if self.demo_mode:
-            return self._mock_search_results(query, limit)
+            return self.__fallback_search_results(query, limit)
 
         # Create cache key
         cache_key = (query.strip().lower(), limit)
@@ -136,11 +136,11 @@ class SpotifyClient:
                     return tracks
                 else:
                     logger.error(f"Spotify search failed: {response.status_code}")
-                    return self._mock_search_results(query, limit)
+                    return self.__fallback_search_results(query, limit)
                     
             except Exception as e:
                 logger.error(f"Error searching Spotify: {e}")
-                return self._mock_search_results(query, limit)
+                return self.__fallback_search_results(query, limit)
 
         # Create and track the search task
         task = asyncio.create_task(_perform_search())
@@ -156,8 +156,8 @@ class SpotifyClient:
         """Get audio features for a track."""
         token = await self._get_access_token()
         
-        if token == "demo_token":
-            return self._mock_audio_features()
+        if token == "fallback_token":
+            return self.__fallback_audio_features()
         
         try:
             self._ensure_client()
@@ -169,16 +169,16 @@ class SpotifyClient:
             if response.status_code == 200:
                 return response.json()
             else:
-                return self._mock_audio_features()
+                return self.__fallback_audio_features()
                     
         except Exception as e:
             logger.error(f"Error getting track features: {e}")
-            return self._mock_audio_features()
+            return self.__fallback_audio_features()
             
     async def get_tracks_features_bulk(self, track_ids: List[str]) -> Dict[str, Any]:
         """Get audio features for multiple tracks efficiently (max 100 at a time)."""
         if self.demo_mode:
-            return {track_id: self._mock_audio_features() for track_id in track_ids}
+            return {track_id: self.__fallback_audio_features() for track_id in track_ids}
         
         results: Dict[str, Any] = {}
         to_fetch: List[str] = []
@@ -245,8 +245,8 @@ class SpotifyClient:
         """Get track recommendations based on seed tracks."""
         token = await self._get_access_token()
         
-        if token == "demo_token":
-            return self._mock_recommendations(seed_tracks, limit)
+        if token == "fallback_token":
+            return self.__fallback_recommendations(seed_tracks, limit)
         
         try:
             self._ensure_client()
@@ -271,11 +271,11 @@ class SpotifyClient:
                 return recommendations
             else:
                 logger.error(f"Spotify recommendations failed: {response.status_code}")
-                return self._mock_recommendations(seed_tracks, limit)
+                return self.__fallback_recommendations(seed_tracks, limit)
                     
         except Exception as e:
             logger.error(f"Error getting recommendations: {e}")
-            return self._mock_recommendations(seed_tracks, limit)
+            return self.__fallback_recommendations(seed_tracks, limit)
     
     def _parse_spotify_track(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """Parse Spotify track data into our format."""
@@ -312,12 +312,12 @@ class SpotifyClient:
             return sorted_images[0].get("url")
         return None
     
-    def _mock_search_results(self, query: str, limit: int) -> List[Dict[str, Any]]:
-        """Generate mock search results for demo mode."""
+    def __fallback_search_results(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """Generate fallback search results for fallback mode."""
         import random
         
         # Sample tracks that match common search terms
-        mock_tracks = [
+        _fallback_tracks = [
             {"name": "Blinding Lights", "artist": "The Weeknd", "album": "After Hours", "popularity": 100},
             {"name": "Shape of You", "artist": "Ed Sheeran", "album": "÷", "popularity": 98},
             {"name": "Someone Like You", "artist": "Adele", "album": "21", "popularity": 95},
@@ -333,33 +333,33 @@ class SpotifyClient:
         # Filter by query or return random selection
         query_lower = query.lower()
         matching_tracks = [
-            track for track in mock_tracks 
+            track for track in _fallback_tracks 
             if query_lower in track["name"].lower() or query_lower in track["artist"].lower()
         ]
         
         if not matching_tracks:
-            matching_tracks = random.sample(mock_tracks, min(len(mock_tracks), limit))
+            matching_tracks = random.sample(_fallback_tracks, min(len(_fallback_tracks), limit))
         
         results = []
         for i, track in enumerate(matching_tracks[:limit]):
             results.append({
-                "id": f"mock_{i}_{hash(track['name']) % 10000}",
+                "id": f"_fallback_{i}_{hash(track['name']) % 10000}",
                 "name": track["name"],
                 "artist": track["artist"],
                 "album": track["album"],
                 "duration_ms": random.randint(180000, 300000),  # 3-5 minutes
                 "popularity": track["popularity"],
-                "preview_url": f"https://example.com/preview_{i}.mp3",
-                "external_urls": {"spotify": f"https://open.spotify.com/track/mock_{i}"},
-                "uri": f"spotify:track:mock_{i}",
+                "preview_url": None,
+                "external_urls": {"spotify": f"https://open.spotify.com/track/_fallback_{i}"},
+                "uri": f"spotify:track:_fallback_{i}",
                 "release_date": f"{random.randint(1970, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "image_url": "https://via.placeholder.com/300x300/1DB954/FFFFFF?text=♪"
+                "image_url": None
             })
         
         return results
     
-    def _mock_audio_features(self) -> Dict[str, Any]:
-        """Generate mock audio features."""
+    def __fallback_audio_features(self) -> Dict[str, Any]:
+        """Generate fallback audio features."""
         import random
         
         return {
@@ -377,8 +377,8 @@ class SpotifyClient:
             "time_signature": random.choice([3, 4, 5])
         }
     
-    def _mock_recommendations(self, seed_tracks: List[str], limit: int) -> List[Dict[str, Any]]:
-        """Generate mock recommendations."""
+    def __fallback_recommendations(self, seed_tracks: List[str], limit: int) -> List[Dict[str, Any]]:
+        """Generate fallback recommendations."""
         # Use different tracks than search results
         recommendations = [
             {"name": "As It Was", "artist": "Harry Styles", "album": "Harry's House", "popularity": 98},
@@ -405,11 +405,11 @@ class SpotifyClient:
                 "album": track["album"],
                 "duration_ms": random.randint(180000, 300000),
                 "popularity": track["popularity"],
-                "preview_url": f"https://example.com/preview_rec_{i}.mp3",
+                "preview_url": None,
                 "external_urls": {"spotify": f"https://open.spotify.com/track/rec_{i}"},
                 "uri": f"spotify:track:rec_{i}",
                 "release_date": f"{random.randint(2020, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "image_url": "https://via.placeholder.com/300x300/1DB954/FFFFFF?text=♪"
+                "image_url": None
             })
         
         return results

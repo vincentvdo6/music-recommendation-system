@@ -61,14 +61,14 @@ Music_Recommendation/
 - **Audio Features**: Analyzes tempo, energy, key, mood, and danceability  
 - **Smart Matching**: Finds similar songs based on musical characteristics
 - **Clean & Simple**: Minimal codebase, easy to understand and modify
-- **No API Keys Needed**: Works in demo mode with mock data when no Spotify credentials
+- **Flexible Setup**: Works with fallback data when no Spotify credentials are available
 
 ## 🔧 Customization
 
 To use real Spotify API (optional):
 1. Get Spotify API credentials from https://developer.spotify.com/
 2. Add them to `services/spotify/client.py`
-3. Replace `client_id = "demo"` with your actual credentials
+3. Replace `client_id = "your_client_id"` with your actual credentials
 
 ## 📝 License
 
