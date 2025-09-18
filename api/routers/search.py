@@ -6,6 +6,8 @@ import httpx
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Request, Query
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from api.models import (
     SearchResponse, SearchHit, Track, AudioFeatures,
@@ -14,6 +16,7 @@ from api.models import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["search"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _explain(features: dict) -> List[str]:
@@ -44,6 +47,7 @@ def _explain(features: dict) -> List[str]:
 
 
 @router.get("/search", response_model=SearchResponse)
+@limiter.limit("30/minute")
 async def search_songs(
     request: Request,
     q: str = Query(..., min_length=2, max_length=200),
@@ -67,13 +71,14 @@ async def search_songs(
 
             # Get features if requested
             features = None
+            features_data = {}
             if include_features:
-                features_data = await client.get_track_features(track.id)
+                features_data = await client.get_track_features(track.id) or {}
                 if features_data:
                     features = AudioFeatures(**features_data)
 
             # Create search hit
-            why = _explain(features_data or {}) if features else []
+            why = _explain(features_data) if features else []
             results.append(SearchHit(
                 track=track,
                 features=features,
@@ -115,6 +120,7 @@ async def search_songs(
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
+@limiter.limit("20/minute")
 async def get_recommendations(
     request: Request,
     seed: str = Query(..., description="Seed track URI or ID"),

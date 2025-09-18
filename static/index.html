@@ -672,6 +672,16 @@
       li.appendChild(text);
       container.appendChild(li);
     }
+
+    // Safe API helper
+    async function apiGet(path) {
+      const res = await fetch(path, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+      }
+      return res.json();
+    }
     let debounceTimeout = null;
     let activeIndex = -1;
     let currentController = null;
@@ -906,8 +916,7 @@
         searchBtn.disabled = true;
 
         // First get search results
-        const searchResponse = await fetch(`${API_BASE}/api/v1/search?q=${encodeURIComponent(query)}&limit=1`);
-        const searchData = await searchResponse.json();
+        const searchData = await apiGet(`${API_BASE}/api/v1/search?q=${encodeURIComponent(query)}&limit=1`);
         
         if (!searchData.tracks || !searchData.tracks[0]) {
           throw new Error('No tracks found');
@@ -930,8 +939,7 @@
         hideSuggestions();
         
         // Get recommendation based on the input track
-        const recResponse = await fetch(`${API_BASE}/api/v1/recommendations?seed=${encodeURIComponent(inputTrack.uri || inputTrack.id)}&limit=1`);
-        const recData = await recResponse.json();
+        const recData = await apiGet(`${API_BASE}/api/v1/recommendations?seed=${encodeURIComponent(inputTrack.uri || inputTrack.id)}&limit=1`);
         
         if (!recData.recommendations || !recData.recommendations[0]) {
           throw new Error('No recommendations found');

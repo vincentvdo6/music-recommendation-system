@@ -10,8 +10,12 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, ORJSONResponse
+from fastapi.responses import FileResponse, ORJSONResponse, PlainTextResponse
 from dotenv import load_dotenv
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import RateLimitExceeded
 
 from api.routers import search
 from services.spotify.client import SpotifyClient
@@ -42,6 +46,9 @@ async def lifespan(app: FastAPI):
         await app.state.spotify.close()
 
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="Music Recommendation API",
     description="Music recommendation system powered by Spotify Web API",
@@ -49,6 +56,10 @@ app = FastAPI(
     default_response_class=ORJSONResponse,  # Faster JSON serialization
     lifespan=lifespan
 )
+
+# Add rate limiting
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
 # Add GZip compression for responses > 500 bytes
 app.add_middleware(GZipMiddleware, minimum_size=500)
@@ -88,6 +99,15 @@ async def security_headers(request: Request, call_next):
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["X-Request-ID"] = rid
 
+    # Content Security Policy (temporary inline allowed for existing script)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' https: data:; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self';"
+    )
+
     return response
 
 
@@ -101,6 +121,14 @@ class CachedStatic(StaticFiles):
 
 # Mount static files with caching
 app.mount("/static", CachedStatic(directory="static"), name="static")
+
+# Rate limit exception handler
+@app.exception_handler(RateLimitExceeded)
+async def ratelimit_handler(request: Request, exc: RateLimitExceeded):
+    """Handle rate limit exceeded errors."""
+    response = PlainTextResponse("Rate limit exceeded. Please try again later.", status_code=429)
+    response.headers["Retry-After"] = str(exc.retry_after or 60)
+    return response
 
 # Include routers
 app.include_router(search.router, prefix="/api/v1")
