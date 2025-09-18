@@ -63,12 +63,16 @@ Music_Recommendation/
 - **Clean & Simple**: Minimal codebase, easy to understand and modify
 - **Flexible Setup**: Works with fallback data when no Spotify credentials are available
 
-## 🔧 Customization
+## 🔧 Configuration (secure)
 
-To use real Spotify API (optional):
-1. Get Spotify API credentials from https://developer.spotify.com/
-2. Add them to `services/spotify/client.py`
-3. Replace `client_id = "your_client_id"` with your actual credentials
+1. Create a `.env` file based on `.env.example`:
+```
+SPOTIFY_CLIENT_ID=your_client_id_here
+SPOTIFY_CLIENT_SECRET=your_client_secret_here
+ALLOWED_ORIGIN=http://localhost:8000
+```
+
+2. Never hardcode secrets in code. The app reads them from env via `python-dotenv`.
 
 ## 📝 License
 
