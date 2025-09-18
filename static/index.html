@@ -646,6 +646,32 @@
 
   <script>
     const API_BASE = 'http://localhost:8000';
+
+    // Safe DOM helpers to prevent XSS
+    function el(tag, className, text) {
+      const e = document.createElement(tag);
+      if (className) e.className = className;
+      if (text !== undefined) e.textContent = text; // SAFE
+      return e;
+    }
+
+    function renderTag(container, tag) {
+      const tagEl = el('span', 'tag');
+      const label = el('span', 'tag-label', `${tag.label}: `);
+      const value = el('span', '', tag.value);
+      tagEl.appendChild(label);
+      tagEl.appendChild(value);
+      container.appendChild(tagEl);
+    }
+
+    function renderReason(container, reason) {
+      const li = el('li', 'reason');
+      const dot = el('span', 'reason-dot');
+      const text = el('span', '', reason);
+      li.appendChild(dot);
+      li.appendChild(text);
+      container.appendChild(li);
+    }
     let debounceTimeout = null;
     let activeIndex = -1;
     let currentController = null;
@@ -729,7 +755,12 @@
       try {
         // Show loading only if no cached result
         if (!cached) {
-          suggestions.innerHTML = '<div class="suggestion" style="justify-content:center;color:#737373;">🔍 Searching...</div>';
+          suggestions.textContent = '';
+          const searchingDiv = el('div', 'suggestion');
+          searchingDiv.style.justifyContent = 'center';
+          searchingDiv.style.color = '#737373';
+          searchingDiv.textContent = '🔍 Searching...';
+          suggestions.appendChild(searchingDiv);
           showSuggestions();
         }
 
@@ -770,7 +801,7 @@
         return;
       }
 
-      suggestions.innerHTML = '';
+      suggestions.textContent = '';
       tracks.forEach((track, index) => {
         const div = document.createElement('div');
         div.className = 'suggestion';
@@ -915,7 +946,7 @@
         recArtwork.src = recommendation.image_url || recArtwork.src;
         
         // Tags
-        recTags.innerHTML = '';
+        recTags.textContent = '';
         const tags = [
           { label: 'Album', value: recommendation.album },
           { label: 'Popularity', value: `${recommendation.popularity}%` },
@@ -923,10 +954,7 @@
         ].filter(tag => tag.value && tag.value !== 'undefined%');
         
         tags.forEach(tag => {
-          const tagEl = document.createElement('span');
-          tagEl.className = 'tag';
-          tagEl.innerHTML = `<span class="tag-label">${tag.label}:</span>${tag.value}`;
-          recTags.appendChild(tagEl);
+          renderTag(recTags, tag);
         });
 
         // Similarity (mock calculation based on popularity)
@@ -953,15 +981,9 @@
           `Both artists share ${getArtisticConnection(inputTrack.artist, recommendation.artist)}`
         ];
 
-        reasons.innerHTML = '';
+        reasons.textContent = '';
         reasonsList.slice(0, 3).forEach(reason => {
-          const li = document.createElement('li');
-          li.className = 'reason';
-          li.innerHTML = `
-            <span class="reason-dot"></span>
-            <span>${reason}</span>
-          `;
-          reasons.appendChild(li);
+          renderReason(reasons, reason);
         });
 
         // Show results
