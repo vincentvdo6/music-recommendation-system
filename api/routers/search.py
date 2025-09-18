@@ -1,201 +1,211 @@
-"""Song search endpoint using Spotify data."""
+"""Song search and recommendations endpoints using Spotify data."""
 
 import time
-from typing import Dict, Any
+import logging
+import httpx
+from typing import List
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
-from services.spotify.client import get_spotify_client
+from api.models import (
+    SearchResponse, SearchHit, Track, AudioFeatures,
+    RecommendationsResponse, RecommendationHit
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["search"])
 
 
-@router.get("/search")
+def _explain(features: dict) -> List[str]:
+    """Generate explanation for track features."""
+    out = []
+    tempo = features.get("tempo")
+    if tempo:
+        if tempo > 140:
+            out.append("High-energy tempo")
+        elif tempo < 80:
+            out.append("Chill/slow tempo")
+
+    energy = features.get("energy")
+    if energy is not None:
+        if energy > 0.7:
+            out.append("High energy")
+        elif energy < 0.3:
+            out.append("Low energy")
+
+    valence = features.get("valence")
+    if valence is not None:
+        if valence > 0.7:
+            out.append("Upbeat mood")
+        elif valence < 0.3:
+            out.append("Melancholic mood")
+
+    return out[:3]
+
+
+@router.get("/search", response_model=SearchResponse)
 async def search_songs(
     request: Request,
-    q: str = Query(..., min_length=2, max_length=200, description="Search query (song name, artist, or both)"),
-    limit: int = Query(7, ge=1, le=25, description="Number of results to return"),
-    include_features: bool = Query(False, description="Include audio features (slower - only for detailed analysis)")
+    q: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(10, ge=1, le=20),
+    include_features: bool = Query(False, description="Include audio features (slower)")
 ):
     """Search for songs using Spotify's database."""
-    
     start_time = time.time()
     request_id = getattr(request.state, "request_id", "unknown")
-    
+
+    client = request.app.state.spotify
+    source = "spotify" if not client.demo_mode else "fallback"
+
     try:
-        spotify_client = get_spotify_client()
-        tracks = await spotify_client.search_tracks(q, limit)
-        
-        if not tracks:
-            return {
-                "query": q,
-                "tracks": [],
-                "total": 0,
-                "request_id": request_id,
-                "processing_time_ms": int((time.time() - start_time) * 1000)
-            }
-        
-        # Fast path: return light objects only (for live search)
-        if not include_features:
-            return {
-                "query": q,
-                "tracks": tracks,
-                "total": len(tracks),
-                "request_id": request_id,
-                "processing_time_ms": int((time.time() - start_time) * 1000)
-            }
-        
-        # Slow path (rare): batch fetch features in one call
-        track_ids = [track['id'] for track in tracks if track.get('id')]
-        if track_ids:
-            try:
-                features_dict = await spotify_client.get_tracks_features_bulk(track_ids)
-                
-                # Merge audio features with track data
-                for track in tracks:
-                    if track['id'] in features_dict:
-                        track['audio_features'] = features_dict[track['id']]
-                        track['searchable_id'] = f"spotify:{track['id']}"
-                        
-            except Exception as e:
-                # Avoid emojis to ensure Windows console compatibility
-                print(f"Warning: Could not fetch audio features: {e}")
-        
-        return {
-            "query": q,
-            "tracks": tracks,
-            "total": len(tracks),
-            "request_id": request_id,
-            "processing_time_ms": int((time.time() - start_time) * 1000)
-        }
-        
+        tracks = await client.search_tracks(q, limit=limit)
+
+        results: List[SearchHit] = []
+        for track_data in tracks:
+            # Parse track
+            track = Track(**track_data)
+
+            # Get features if requested
+            features = None
+            if include_features:
+                features_data = await client.get_track_features(track.id)
+                if features_data:
+                    features = AudioFeatures(**features_data)
+
+            # Create search hit
+            why = _explain(features_data or {}) if features else []
+            results.append(SearchHit(
+                track=track,
+                features=features,
+                why=why
+            ))
+
+        processing_time = int((time.time() - start_time) * 1000)
+
+        return SearchResponse(
+            query=q,
+            count=len(results),
+            results=results,
+            source=source,
+            request_id=request_id,
+            processing_time_ms=processing_time
+        )
+
+    except httpx.HTTPError as e:
+        # Surface HTTP errors appropriately
+        if hasattr(e, 'response') and e.response.status_code in (401, 403, 429, 500):
+            # Try fallback
+            tracks = await client._fallback_search_results(q, limit)
+            results = [SearchHit(track=Track(**t), features=None, why=[]) for t in tracks]
+
+            return SearchResponse(
+                query=q,
+                count=len(results),
+                results=results,
+                source="fallback",
+                request_id=request_id,
+                processing_time_ms=int((time.time() - start_time) * 1000)
+            )
+        else:
+            raise HTTPException(status_code=502, detail="Upstream error") from e
+
     except Exception as e:
-        print(f"Song search failed: {e}")
+        logger.error("Search failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-@router.get("/recommendations")
-async def get_music_recommendations(
+@router.get("/recommendations", response_model=RecommendationsResponse)
+async def get_recommendations(
     request: Request,
-    seed: str = Query(..., min_length=5, max_length=200, description="Seed track ID (from search results)"),
-    limit: int = Query(12, ge=1, le=25, description="Number of recommendations")
+    seed: str = Query(..., description="Seed track URI or ID"),
+    limit: int = Query(5, ge=1, le=20, description="Number of recommendations")
 ):
-    """Get music recommendations based on a seed song."""
-    
+    """Get song recommendations based on a seed track."""
     start_time = time.time()
     request_id = getattr(request.state, "request_id", "unknown")
-    
-    # Avoid emojis to ensure Windows console compatibility
-    print(f"Getting recommendations for: {seed} (limit: {limit})")
-    
+
+    client = request.app.state.spotify
+    source = "spotify" if not client.demo_mode else "fallback"
+
     try:
-        # Extract Spotify track ID from seed
-        if seed.startswith("spotify:"):
-            track_id = seed.replace("spotify:", "")
-        else:
-            track_id = seed
-        
-        # Get recommendations from Spotify
-        spotify_client = get_spotify_client()
-        recommendations = await spotify_client.get_recommendations([track_id], limit)
-        
-        # Enhance with audio features and similarity scores
+        # Extract track ID from URI if needed
+        track_id = seed.split(":")[-1] if ":" in seed else seed
+        recommendations = await client.get_recommendations([track_id], limit)
+
         enhanced_recommendations = []
-        for i, track in enumerate(recommendations):
+        for i, track_data in enumerate(recommendations):
             try:
                 # Get audio features
-                audio_features = await spotify_client.get_track_features(track["id"])
-                
+                audio_features = await client.get_track_features(track_data["id"])
+
                 # Calculate similarity score based on popularity and position
                 base_similarity = 0.95 - (i * 0.03)  # Decreasing similarity
-                popularity_boost = (track.get("popularity", 50) / 100) * 0.1
+                popularity_boost = (track_data.get("popularity", 50) / 100) * 0.1
                 similarity_score = min(0.98, base_similarity + popularity_boost)
-                
-                enhanced_track = {
-                    **track,
-                    "audio_features": audio_features,
-                    "similarity_score": round(similarity_score, 3),
-                    "rank_score": round(similarity_score * 0.9, 3),  # Slightly lower rank score
-                    "explanation": {
-                        "top_factors": _generate_explanation(audio_features),
+
+                enhanced_track = RecommendationHit(
+                    **track_data,
+                    audio_features=AudioFeatures(**audio_features) if audio_features else None,
+                    similarity_score=similarity_score,
+                    rank_score=0.882,  # Fixed rank score for now
+                    explanation={
+                        "top_factors": _explain(audio_features or {}),
                         "similarity_reason": "Based on audio features and listening patterns",
-                        "ranking_boost": f"High popularity ({track.get('popularity', 50)}%)"
+                        "ranking_boost": f"High popularity ({track_data.get('popularity', 0)}%)"
                     }
-                }
+                )
                 enhanced_recommendations.append(enhanced_track)
-                
+
             except Exception as e:
-                print(f"Warning: Failed to enhance recommendation {track['id']}: {e}")
-                # Include basic track without enhancement
-                enhanced_recommendations.append({
-                    **track,
-                    "similarity_score": round(0.8 - (i * 0.02), 3),
-                    "rank_score": round(0.75 - (i * 0.02), 3),
-                    "explanation": {
-                        "top_factors": ["Similar genre", "Popular track", "Audio similarity"],
-                        "similarity_reason": "Based on Spotify's recommendation algorithm"
-                    }
-                })
-        
-        response = {
-            "seed": seed,
-            "recommendations": enhanced_recommendations,
-            "total": len(enhanced_recommendations),
-            "algorithm": "Spotify Web API + Audio Feature Analysis",
-            "request_id": request_id,
-            "processing_time_ms": int((time.time() - start_time) * 1000)
-        }
-        
-        print(f"Recommendations completed: {len(enhanced_recommendations)} results in {response['processing_time_ms']}ms")
-        
-        return response
-        
+                logger.warning("Failed to enhance recommendation %s: %s", track_data['id'], e)
+                # Add basic recommendation without features
+                basic_track = RecommendationHit(
+                    **track_data,
+                    audio_features=None,
+                    similarity_score=0.85,
+                    rank_score=0.5,
+                    explanation={"top_factors": [], "similarity_reason": "Basic match", "ranking_boost": ""}
+                )
+                enhanced_recommendations.append(basic_track)
+
+        processing_time = int((time.time() - start_time) * 1000)
+
+        return RecommendationsResponse(
+            seed=seed,
+            recommendations=enhanced_recommendations,
+            total=len(enhanced_recommendations),
+            algorithm="Spotify Web API + Audio Feature Analysis",
+            source=source,
+            request_id=request_id,
+            processing_time_ms=processing_time
+        )
+
+    except httpx.HTTPError as e:
+        if hasattr(e, 'response') and e.response.status_code in (401, 403, 429, 500):
+            # Try fallback
+            fallback_recs = await client._fallback_recommendations([track_id], limit)
+            basic_recs = [
+                RecommendationHit(
+                    **rec,
+                    audio_features=None,
+                    similarity_score=0.75,
+                    rank_score=0.5,
+                    explanation={"top_factors": [], "similarity_reason": "Fallback data", "ranking_boost": ""}
+                ) for rec in fallback_recs
+            ]
+
+            return RecommendationsResponse(
+                seed=seed,
+                recommendations=basic_recs,
+                total=len(basic_recs),
+                algorithm="Fallback recommendation engine",
+                source="fallback",
+                request_id=request_id,
+                processing_time_ms=int((time.time() - start_time) * 1000)
+            )
+        else:
+            raise HTTPException(status_code=502, detail="Upstream error") from e
+
     except Exception as e:
-        print(f"Recommendations failed: {e}")
+        logger.error("Recommendations failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Recommendations failed: {str(e)}")
-
-
-def _generate_explanation(audio_features: Dict[str, Any]) -> list[str]:
-    """Generate human-readable explanation based on audio features."""
-    explanations = []
-    
-    # Tempo-based explanations
-    tempo = audio_features.get("tempo", 120)
-    if tempo > 140:
-        explanations.append("High energy tempo")
-    elif tempo < 80:
-        explanations.append("Relaxed, slower tempo")
-    else:
-        explanations.append("Moderate tempo")
-    
-    # Energy-based explanations
-    energy = audio_features.get("energy", 0.5)
-    if energy > 0.8:
-        explanations.append("High energy track")
-    elif energy < 0.3:
-        explanations.append("Calm, low energy")
-    else:
-        explanations.append("Balanced energy level")
-    
-    # Danceability
-    danceability = audio_features.get("danceability", 0.5)
-    if danceability > 0.7:
-        explanations.append("Highly danceable")
-    elif danceability < 0.4:
-        explanations.append("More listening-focused")
-    
-    # Valence (mood)
-    valence = audio_features.get("valence", 0.5)
-    if valence > 0.7:
-        explanations.append("Positive, upbeat mood")
-    elif valence < 0.3:
-        explanations.append("Melancholic or sad mood")
-    
-    # Acousticness
-    acousticness = audio_features.get("acousticness", 0.5)
-    if acousticness > 0.7:
-        explanations.append("Acoustic instrumentation")
-    elif acousticness < 0.2:
-        explanations.append("Electronic/produced sound")
-    
-    return explanations[:3]  # Return top 3 explanations
