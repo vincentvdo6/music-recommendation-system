@@ -645,7 +645,7 @@
   </main>
 
   <script>
-    const API_BASE = 'http://localhost:8000';
+    const API_BASE = window.location.origin;
 
     // Safe DOM helpers to prevent XSS
     function el(tag, className, text) {
@@ -785,7 +785,7 @@
         }
 
         const data = await response.json();
-        const tracks = data.tracks || [];
+        const tracks = data.results ? data.results.map(hit => hit.track) : [];
 
         // Cache the fresh result
         setCachedResult(cacheKey, tracks);
@@ -918,11 +918,11 @@
         // First get search results
         const searchData = await apiGet(`${API_BASE}/api/v1/search?q=${encodeURIComponent(query)}&limit=1`);
         
-        if (!searchData.tracks || !searchData.tracks[0]) {
+        if (!searchData.results || !searchData.results[0]) {
           throw new Error('No tracks found');
         }
 
-        const track = searchData.tracks[0];
+        const track = searchData.results[0].track;
         await handleRecommendation(track);
 
       } catch (error) {
