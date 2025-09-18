@@ -91,8 +91,16 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Cached static files serving
+class CachedStatic(StaticFiles):
+    async def get_response(self, path, scope):
+        resp: Response = await super().get_response(path, scope)
+        if resp.status_code == 200:
+            resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+        return resp
+
+# Mount static files with caching
+app.mount("/static", CachedStatic(directory="static"), name="static")
 
 # Include routers
 app.include_router(search.router, prefix="/api/v1")
