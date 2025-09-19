@@ -239,8 +239,9 @@ class SpotifyClient:
 
             return [self._parse_spotify_track(t) for t in data.get("tracks", [])]
 
-        except httpx.HTTPError:
-            return self._fallback_recommendations(seed_tracks, limit)
+        except httpx.HTTPError as exc:
+            logger.warning("Spotify recommendations API failed (%s), allowing Apple Music fallback", exc)
+            return []
 
     def _parse_spotify_track(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a Spotify track item into our format."""

@@ -84,13 +84,31 @@ class AppleMusicClient:
                 candidates.extend(artist_tracks)
 
         if not candidates and artist_name:
-            artist_results = await self.search_tracks(artist_name, limit + 5)
+            artist_results = await self.search_tracks(artist_name, limit + 10)
             artist_lower = artist_name.lower()
-            candidates.extend(t for t in artist_results if t.get("artist", "").lower() == artist_lower)
+            exact_matches = [t for t in artist_results if t.get("artist", "").lower() == artist_lower]
+            candidates.extend(exact_matches)
+
+            if len(candidates) < limit and artist_results:
+                similar_matches = [t for t in artist_results if artist_lower in t.get("artist", "").lower()]
+                candidates.extend(similar_matches)
 
         if not candidates and track_name:
             query = f"{track_name} {artist_name or ''}".strip()
-            candidates.extend(await self.search_tracks(query, limit + 5))
+            candidates.extend(await self.search_tracks(query, limit + 10))
+
+        if not candidates and artist_name:
+            genre_searches = [
+                f"{artist_name} pop",
+                f"{artist_name} rock",
+                f"{artist_name} indie",
+                f"similar to {artist_name}",
+            ]
+            for search_term in genre_searches:
+                if len(candidates) >= limit:
+                    break
+                results = await self.search_tracks(search_term, limit)
+                candidates.extend(results)
 
         unique: List[Dict[str, Any]] = []
         seen: set[str] = set()

@@ -99,12 +99,20 @@ class MusicService:
                 recommendations = []
 
         if not recommendations:
-            recommendations = await self.apple.get_related_tracks(
-                track_id=track_id if provider == "apple" else None,
-                track_name=track_name,
-                artist_name=artist_name,
-                limit=limit,
-            )
+            if provider == "spotify" and (track_name or artist_name):
+                recommendations = await self.apple.get_related_tracks(
+                    track_id=None,
+                    track_name=track_name,
+                    artist_name=artist_name,
+                    limit=limit,
+                )
+            elif provider == "apple" and track_id:
+                recommendations = await self.apple.get_related_tracks(
+                    track_id=track_id,
+                    track_name=track_name,
+                    artist_name=artist_name,
+                    limit=limit,
+                )
             source = "apple"
 
         if not recommendations and self.apple:
@@ -115,6 +123,11 @@ class MusicService:
                     recommendations = [t for t in recommendations if t.get("id") != track_id]
                 recommendations = recommendations[:limit]
                 source = "apple"
+
+        if not recommendations and self.apple and (track_name or artist_name):
+            genre_query = f"{artist_name} similar artists" if artist_name else f"{track_name} similar songs"
+            recommendations = await self.apple.search_tracks(genre_query, limit=limit)
+            source = "apple"
 
         return recommendations, source
 
