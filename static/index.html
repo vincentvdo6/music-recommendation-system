@@ -728,20 +728,21 @@
 
         <div class="player-controls" id="playerControls">
           <button class="play-btn" id="playBtn">
-            <span class="play-icon">▶</span>
-            <span class="pause-icon" style="display: none;">⏸</span>
+            <span class="play-icon">Play</span>
+            <span class="pause-icon" style="display: none;">Pause</span>
           </button>
           <div class="track-info">
             <div class="track-preview-title" id="previewTitle">Click to preview</div>
             <div class="track-duration" id="trackDuration">0:30</div>
           </div>
           <div class="volume-control">
-            <span class="volume-icon">🔊</span>
+            <span class="volume-icon">Vol</span>
             <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="50">
           </div>
         </div>
 
-        <audio id="audioPlayer" preload="none"></audio>
+        <audio id="audioPlayer" preload="none" crossorigin="anonymous"></audio>
+        <div id="spotifyEmbed" style="margin-top:1rem; display:none;"></div>
 
         <div class="note">
           <p>
@@ -846,18 +847,37 @@
     }
 
     // Audio player functions
-    function initializeAudioPlayer(previewUrl, trackName) {
+    function showSpotifyEmbed(trackId) {
+      const embed = document.getElementById('spotifyEmbed');
+      embed.innerHTML =
+        `<iframe style="border-radius:12px"
+          src="https://open.spotify.com/embed/track/${trackId}?utm_source=generator"
+          width="100%" height="152" frameborder="0"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>`;
+      embed.style.display = 'block';
+    }
+
+    function initializeAudioPlayer(previewUrl, trackName, trackId) {
+      const embed = document.getElementById('spotifyEmbed');
+
       if (previewUrl) {
+        embed.style.display = 'none';
         audioPlayer.src = previewUrl;
+        audioPlayer.load();
         previewTitle.textContent = `Preview: ${trackName}`;
         playBtn.disabled = false;
         trackDuration.textContent = '0:30';
+        console.log('Audio initialized with preview URL:', previewUrl);
       } else {
         audioPlayer.src = '';
         previewTitle.textContent = 'No preview available';
         playBtn.disabled = true;
         trackDuration.textContent = '--';
         resetPlayButton();
+
+        if (trackId && !trackId.startsWith('rec_')) {
+          showSpotifyEmbed(trackId);
+        }
       }
     }
 
@@ -927,7 +947,7 @@
           const searchingDiv = el('div', 'suggestion');
           searchingDiv.style.justifyContent = 'center';
           searchingDiv.style.color = '#737373';
-          searchingDiv.textContent = '🔍 Searching...';
+          searchingDiv.textContent = 'Searching...';
           suggestions.appendChild(searchingDiv);
           showSuggestions();
         }
@@ -976,9 +996,14 @@
         div.dataset.index = index;
         
         const img = document.createElement('img');
-        img.src = track.image_url || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjMjYyNjI2Ii8+CjxwYXRoIGQ9Ik0yMCAzMEMyNS41MjI5IDMwIDMwIDI1LjUyMjkgMzAgMjBDMzAgMTQuNDc3MSAyNS41MjI5IDEwIDIwIDEwQzE0LjQ3NzEgMTAgMTAgMTQuNDc3MSAxMCAyMEMxMCAyNS41MjI5IDE0LjQ3NzEgMzAgMjAgMzBaIiBzdHJva2U9IiM3Mzc0NzMiIHN0cm9rZS13aWR0aD0iMiIvPgo8cGF0aCBkPSJNMjMgMTdMMjEgMTlMMjMgMjEiIHN0cm9rZT0iIzczNzQ3MyIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+';
+        const searchPlaceholder = 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="100%" height="100%" fill="#262626"/><text x="50%" y="50%" fill="#737473" font-size="8" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle">No Cover</text></svg>`);
+        img.src = track.image_url || searchPlaceholder;
         img.alt = `${track.name} artwork`;
-        img.onerror = () => img.style.display = 'none';
+        img.onerror = (e) => {
+          console.error('Image failed to load:', imageUrl, e);
+          img.style.display = 'none';
+        };
+        img.onload = () => console.log('Image loaded successfully:', imageUrl);
         
         const infoDiv = document.createElement('div');
         infoDiv.className = 'suggestion-info';
@@ -1068,6 +1093,12 @@
       updatePlayButton();
     });
 
+    audioPlayer.addEventListener('error', () => {
+      console.error('Audio error', audioPlayer.error?.code, audioPlayer.src);
+      previewTitle.textContent = 'Audio playback failed';
+      playBtn.disabled = true;
+    });
+
     volumeSlider.addEventListener('input', (e) => {
       audioPlayer.volume = e.target.value / 100;
     });
@@ -1122,7 +1153,14 @@
         hideSuggestions();
         
         // Get recommendation based on the input track
-        const recData = await apiGet(`${API_BASE}/api/v1/recommendations?seed=${encodeURIComponent(inputTrack.uri || inputTrack.id)}&limit=1`);
+        const params = new URLSearchParams({
+          seed: inputTrack.uri || inputTrack.id || '',
+          limit: '1'
+        });
+        if (inputTrack.name) params.set('track_name', inputTrack.name);
+        if (inputTrack.artist) params.set('artist_name', inputTrack.artist);
+
+        const recData = await apiGet(`${API_BASE}/api/v1/recommendations?${params.toString()}`);
         
         if (!recData.recommendations || !recData.recommendations[0]) {
           throw new Error('No recommendations found');
@@ -1134,7 +1172,14 @@
         inputSummary.textContent = `${inputTrack.name} — ${inputTrack.artist}`;
         recTitle.textContent = recommendation.name;
         recArtist.textContent = recommendation.artist;
-        recArtwork.src = recommendation.image_url || recArtwork.src;
+        const placeholder = 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="100%" height="100%" fill="#1f1f1f"/><text x="50%" y="50%" fill="#999" font-size="24" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle">No Cover</text></svg>`);
+        console.log('Recommendation data:', {
+          id: recommendation.id,
+          image_url: recommendation.image_url,
+          preview_url: recommendation.preview_url
+        });
+        recArtwork.src = recommendation.image_url || placeholder;
+        recArtwork.referrerPolicy = 'no-referrer';
         
         // Tags
         recTags.textContent = '';
@@ -1154,10 +1199,22 @@
         similarityFill.style.width = `${similarity}%`;
 
         // Initialize audio player
-        initializeAudioPlayer(recommendation.preview_url, recommendation.name);
+        initializeAudioPlayer(recommendation.preview_url, recommendation.name, recommendation.id);
 
         // Spotify link
-        spotifyLink.href = recommendation.external_urls?.spotify || `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
+        const external = recommendation.external_urls || {};
+        spotifyLink.href =
+          external.spotify ||
+          external.appleMusic ||
+          external.itunes ||
+          `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
+        if (external.spotify) {
+          spotifyLink.textContent = 'Open in Spotify';
+        } else if (external.appleMusic || external.itunes) {
+          spotifyLink.textContent = 'Open in Apple Music';
+        } else {
+          spotifyLink.textContent = 'Open in Spotify';
+        }
 
         // Show results
         resultSection.classList.remove('hidden');

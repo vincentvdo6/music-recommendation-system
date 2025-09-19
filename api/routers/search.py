@@ -1,27 +1,31 @@
-"""Song search and recommendations endpoints using Spotify data."""
+"""Song search and recommendations endpoints using Spotify and Apple data."""
 
 import time
 import logging
-import httpx
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from api.models import (
-    SearchResponse, SearchHit, Track, AudioFeatures,
-    RecommendationsResponse, RecommendationHit
+    SearchResponse,
+    SearchHit,
+    Track,
+    AudioFeatures,
+    RecommendationsResponse,
+    RecommendationHit,
 )
+from services.spotify.client import SpotifyClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["search"])
 limiter = Limiter(key_func=get_remote_address)
 
 
-def _explain(features: dict) -> List[str]:
+def _explain(features: Dict[str, Any]) -> List[str]:
     """Generate explanation for track features."""
-    out = []
+    out: List[str] = []
     tempo = features.get("tempo")
     if tempo:
         if tempo > 140:
@@ -46,6 +50,27 @@ def _explain(features: dict) -> List[str]:
     return out[:3]
 
 
+def _metadata_hints(track: Dict[str, Any]) -> List[str]:
+    """Generate explanation hints from metadata when features are absent."""
+    hints: List[str] = []
+    metadata = track.get("metadata") or {}
+
+    genre = metadata.get("primary_genre")
+    if genre:
+        hints.append(f"Genre: {genre}")
+
+    artist = track.get("artist")
+    provider = track.get("provider")
+    if provider == "apple" and artist:
+        hints.append(f"Similar artist: {artist}")
+
+    popularity = track.get("popularity")
+    if popularity:
+        hints.append(f"Listener popularity: {popularity}%")
+
+    return hints[:3]
+
+
 @router.get("/search", response_model=SearchResponse)
 @limiter.limit("30/minute")
 async def search_songs(
@@ -54,35 +79,36 @@ async def search_songs(
     limit: int = Query(10, ge=1, le=20),
     include_features: bool = Query(False, description="Include audio features (slower)")
 ):
-    """Search for songs using Spotify's database."""
+    """Search for songs using available music providers."""
     start_time = time.time()
     request_id = getattr(request.state, "request_id", "unknown")
 
-    client = request.app.state.spotify
-    source = "spotify" if not client.demo_mode else "fallback"
+    music_service = request.app.state.music
 
     try:
-        tracks = await client.search_tracks(q, limit=limit)
+        tracks_data, features_map, source = await music_service.search_tracks(
+            q,
+            limit=limit,
+            include_features=include_features,
+        )
 
         results: List[SearchHit] = []
-        for track_data in tracks:
-            # Parse track
-            track = Track(**track_data)
+        for track_dict in tracks_data:
+            track = Track(**track_dict)
 
-            # Get features if requested
-            features = None
-            features_data = {}
+            features_data: Dict[str, Any] = {}
+            features: Optional[AudioFeatures] = None
             if include_features:
-                features_data = await client.get_track_features(track.id) or {}
+                features_data = features_map.get(track.id, {}) if isinstance(features_map, dict) else {}
                 if features_data:
                     features = AudioFeatures(**features_data)
 
-            # Create search hit
-            why = _explain(features_data) if features else []
+            hints = _explain(features_data) if features_data else _metadata_hints(track_dict)
+
             results.append(SearchHit(
                 track=track,
                 features=features,
-                why=why
+                why=hints
             ))
 
         processing_time = int((time.time() - start_time) * 1000)
@@ -96,27 +122,9 @@ async def search_songs(
             processing_time_ms=processing_time
         )
 
-    except httpx.HTTPError as e:
-        # Surface HTTP errors appropriately
-        if hasattr(e, 'response') and e.response.status_code in (401, 403, 429, 500):
-            # Try fallback
-            tracks = await client._fallback_search_results(q, limit)
-            results = [SearchHit(track=Track(**t), features=None, why=[]) for t in tracks]
-
-            return SearchResponse(
-                query=q,
-                count=len(results),
-                results=results,
-                source="fallback",
-                request_id=request_id,
-                processing_time_ms=int((time.time() - start_time) * 1000)
-            )
-        else:
-            raise HTTPException(status_code=502, detail="Upstream error") from e
-
-    except Exception as e:
-        logger.error("Search failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+    except Exception as exc:  # pragma: no cover - defensive catch
+        logger.error("Search failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(exc)}")
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
@@ -124,94 +132,88 @@ async def search_songs(
 async def get_recommendations(
     request: Request,
     seed: str = Query(..., description="Seed track URI or ID"),
-    limit: int = Query(5, ge=1, le=20, description="Number of recommendations")
+    limit: int = Query(5, ge=1, le=20, description="Number of recommendations"),
+    track_name: Optional[str] = Query(None, description="Seed track name for non-Spotify IDs"),
+    artist_name: Optional[str] = Query(None, description="Seed artist name for non-Spotify IDs"),
 ):
     """Get song recommendations based on a seed track."""
     start_time = time.time()
     request_id = getattr(request.state, "request_id", "unknown")
 
-    client = request.app.state.spotify
-    source = "spotify" if not client.demo_mode else "fallback"
+    music_service = request.app.state.music
+    spotify_client: Optional[SpotifyClient] = getattr(request.app.state, "spotify", None)
 
     try:
-        # Extract track ID from URI if needed
-        track_id = seed.split(":")[-1] if ":" in seed else seed
-        recommendations = await client.get_recommendations([track_id], limit)
+        recommendations_data, source = await music_service.get_recommendations(
+            seed,
+            limit=limit,
+            track_name=track_name,
+            artist_name=artist_name,
+        )
 
-        enhanced_recommendations = []
-        for i, track_data in enumerate(recommendations):
-            try:
-                # Get audio features
-                audio_features = await client.get_track_features(track_data["id"])
+        logger.info(f"Recommendations source: {source}, count: {len(recommendations_data)}, demo_mode: {spotify_client.demo_mode if spotify_client else 'N/A'}")
 
-                # Calculate similarity score based on popularity and position
-                base_similarity = 0.95 - (i * 0.03)  # Decreasing similarity
-                popularity_boost = (track_data.get("popularity", 50) / 100) * 0.1
+        enhanced_recommendations: List[RecommendationHit] = []
+        for idx, track_dict in enumerate(recommendations_data):
+            provider = track_dict.get("provider")
+            audio_features: Optional[AudioFeatures] = None
+            explanation: List[str] = []
+
+            if provider == "spotify" and spotify_client and not spotify_client.demo_mode:
+                features_data = await spotify_client.get_track_features(track_dict["id"]) or {}
+                if features_data:
+                    audio_features = AudioFeatures(**features_data)
+                    explanation = _explain(features_data)
+                base_similarity = 0.95 - (idx * 0.03)
+                popularity_boost = (track_dict.get("popularity", 50) / 100) * 0.1
                 similarity_score = min(0.98, base_similarity + popularity_boost)
+                rank_score = 0.882
+                explanation_dict = {
+                    "top_factors": explanation,
+                    "similarity_reason": "Based on audio features and listening patterns",
+                    "ranking_boost": f"High popularity ({track_dict.get('popularity', 0)}%)"
+                }
+            else:
+                metadata_hints = _metadata_hints(track_dict)
+                if artist_name and track_dict.get("artist") and track_dict["artist"].lower() == artist_name.lower():
+                    metadata_hints.insert(0, f"Artist match: {track_dict['artist']}")
 
-                enhanced_track = RecommendationHit(
-                    **track_data,
-                    audio_features=AudioFeatures(**audio_features) if audio_features else None,
-                    similarity_score=similarity_score,
-                    rank_score=0.882,  # Fixed rank score for now
-                    explanation={
-                        "top_factors": _explain(audio_features or {}),
-                        "similarity_reason": "Based on audio features and listening patterns",
-                        "ranking_boost": f"High popularity ({track_data.get('popularity', 0)}%)"
-                    }
-                )
-                enhanced_recommendations.append(enhanced_track)
+                similarity_score = max(0.72, min(0.9, 0.88 - idx * 0.04))
+                rank_score = 0.62
+                explanation_dict = {
+                    "top_factors": metadata_hints[:3],
+                    "similarity_reason": "Curated via Apple Music catalog",
+                    "ranking_boost": f"Popularity estimate ({track_dict.get('popularity', 70)}%)"
+                }
 
-            except Exception as e:
-                logger.warning("Failed to enhance recommendation %s: %s", track_data['id'], e)
-                # Add basic recommendation without features
-                basic_track = RecommendationHit(
-                    **track_data,
-                    audio_features=None,
-                    similarity_score=0.85,
-                    rank_score=0.5,
-                    explanation={"top_factors": [], "similarity_reason": "Basic match", "ranking_boost": ""}
-                )
-                enhanced_recommendations.append(basic_track)
+            enhanced_payload = dict(track_dict)
+            enhanced_payload.update({
+                "audio_features": audio_features,
+                "similarity_score": similarity_score,
+                "rank_score": rank_score,
+                "explanation": explanation_dict,
+            })
+
+            enhanced_recommendations.append(RecommendationHit(**enhanced_payload))
 
         processing_time = int((time.time() - start_time) * 1000)
+
+        algorithm = (
+            "Spotify Web API + Audio Feature Analysis"
+            if source == "spotify"
+            else "Apple Music catalog similarity"
+        )
 
         return RecommendationsResponse(
             seed=seed,
             recommendations=enhanced_recommendations,
             total=len(enhanced_recommendations),
-            algorithm="Spotify Web API + Audio Feature Analysis",
+            algorithm=algorithm,
             source=source,
             request_id=request_id,
             processing_time_ms=processing_time
         )
 
-    except httpx.HTTPError as e:
-        if hasattr(e, 'response') and e.response.status_code in (401, 403, 429, 500):
-            # Try fallback
-            fallback_recs = await client._fallback_recommendations([track_id], limit)
-            basic_recs = [
-                RecommendationHit(
-                    **rec,
-                    audio_features=None,
-                    similarity_score=0.75,
-                    rank_score=0.5,
-                    explanation={"top_factors": [], "similarity_reason": "Fallback data", "ranking_boost": ""}
-                ) for rec in fallback_recs
-            ]
-
-            return RecommendationsResponse(
-                seed=seed,
-                recommendations=basic_recs,
-                total=len(basic_recs),
-                algorithm="Fallback recommendation engine",
-                source="fallback",
-                request_id=request_id,
-                processing_time_ms=int((time.time() - start_time) * 1000)
-            )
-        else:
-            raise HTTPException(status_code=502, detail="Upstream error") from e
-
-    except Exception as e:
-        logger.error("Recommendations failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Recommendations failed: {str(e)}")
+    except Exception as exc:  # pragma: no cover - defensive catch
+        logger.error("Recommendations failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Recommendations failed: {str(exc)}")

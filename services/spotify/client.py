@@ -25,6 +25,9 @@ class SpotifyClient:
         # Fallback mode if no credentials provided
         self.demo_mode = not (self.client_id and self.client_secret)
 
+        if self.demo_mode:
+            logger.warning("Spotify in DEMO mode (no credentials) — images/previews will be empty.")
+
         # HTTP client and token management
         self._client: Optional[httpx.AsyncClient] = None
         self._token_lock = asyncio.Lock()
@@ -80,17 +83,35 @@ class SpotifyClient:
 
             creds = f"{self.client_id}:{self.client_secret}".encode()
             b64 = base64.b64encode(creds).decode()
-            resp = await self._client.post(
-                "https://accounts.spotify.com/api/token",
-                headers={"Authorization": f"Basic {b64}"},
-                data={"grant_type": "client_credentials"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            self._access_token = data["access_token"]
-            expires_in = int(data.get("expires_in", 3600)) - 60
-            self._token_expiry = datetime.utcnow() + timedelta(seconds=max(expires_in, 60))
-            return self._access_token
+            try:
+                resp = await self._client.post(
+                    "https://accounts.spotify.com/api/token",
+                    headers={"Authorization": f"Basic {b64}"},
+                    data={"grant_type": "client_credentials"},
+                )
+
+                if resp.status_code != 200:
+                    logger.error(f"Spotify token request failed: {resp.status_code} {resp.text}")
+                    raise httpx.HTTPStatusError(f"Token request failed: {resp.status_code}", request=resp.request, response=resp)
+
+                data = resp.json()
+
+                if "access_token" not in data:
+                    logger.error(f"Spotify token response missing access_token: {data}")
+                    raise ValueError("Token response missing access_token")
+
+                self._access_token = data["access_token"]
+                expires_in = int(data.get("expires_in", 3600)) - 60
+                self._token_expiry = datetime.utcnow() + timedelta(seconds=max(expires_in, 60))
+                logger.info("Successfully obtained Spotify access token")
+                return self._access_token
+
+            except httpx.HTTPError as e:
+                logger.error(f"Spotify token request HTTP error: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Spotify token request failed: {e}")
+                raise
 
     async def _request(self, method: str, url: str, *, params=None) -> httpx.Response:
         """Make a request with retry logic and rate limiting."""
@@ -228,8 +249,16 @@ class SpotifyClient:
         if item.get("album", {}).get("images"):
             image_url = item["album"]["images"][0]["url"]
 
+        metadata = {
+            "spotify_album_id": item.get("album", {}).get("id"),
+            "spotify_artist_ids": [
+                artist.get("id") for artist in item.get("artists", []) if artist.get("id")
+            ],
+        }
+
         return {
             "id": item["id"],
+            "provider": "spotify",
             "name": item["name"],
             "artist": item["artists"][0]["name"] if item.get("artists") else "Unknown",
             "album": item.get("album", {}).get("name", "Unknown"),
@@ -239,7 +268,8 @@ class SpotifyClient:
             "external_urls": item.get("external_urls", {}),
             "uri": item.get("uri", ""),
             "release_date": item.get("album", {}).get("release_date", ""),
-            "image_url": image_url
+            "image_url": image_url,
+            "metadata": {k: v for k, v in metadata.items() if v},
         }
 
     def _fallback_search_results(self, query: str, limit: int) -> List[Dict[str, Any]]:
@@ -281,7 +311,9 @@ class SpotifyClient:
                 "external_urls": {"spotify": f"https://open.spotify.com/track/fallback_{i}"},
                 "uri": f"spotify:track:fallback_{i}",
                 "release_date": f"{random.randint(1970, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "image_url": None
+                "image_url": None,
+                "provider": "spotify-fallback",
+                "metadata": {},
             })
 
         return results
@@ -328,7 +360,9 @@ class SpotifyClient:
                 "external_urls": {"spotify": f"https://open.spotify.com/track/rec_{i}"},
                 "uri": f"spotify:track:rec_{i}",
                 "release_date": f"{random.randint(2020, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "image_url": None
+                "image_url": None,
+                "provider": "spotify-fallback",
+                "metadata": {},
             })
 
         return results

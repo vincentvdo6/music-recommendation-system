@@ -1,0 +1,159 @@
+"""High level orchestration for music data providers."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from services.apple.client import AppleMusicClient
+from services.spotify.client import SpotifyClient
+
+logger = logging.getLogger(__name__)
+
+
+class MusicService:
+    """Coordinates Spotify and Apple providers to keep media complete."""
+
+    def __init__(
+        self,
+        *,
+        spotify: Optional[SpotifyClient] = None,
+        apple: Optional[AppleMusicClient] = None,
+    ) -> None:
+        self.spotify = spotify
+        self.apple = apple or AppleMusicClient()
+
+    async def start(self) -> None:
+        tasks = []
+        if self.spotify:
+            tasks.append(self.spotify.start())
+        if self.apple:
+            tasks.append(self.apple.start())
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def close(self) -> None:
+        tasks = []
+        if self.spotify:
+            tasks.append(self.spotify.close())
+        if self.apple:
+            tasks.append(self.apple.close())
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def search_tracks(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        include_features: bool = False,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str]:
+        """Return tracks, optional feature map, and source identifier."""
+        tracks: List[Dict[str, Any]] = []
+        features: Dict[str, Any] = {}
+        source = "apple"
+
+        if self.spotify and not self.spotify.demo_mode:
+            try:
+                tracks = await self.spotify.search_tracks(query, limit=limit)
+                source = "spotify"
+                if include_features and tracks:
+                    ids = [track["id"] for track in tracks]
+                    features = await self.spotify.get_tracks_features_bulk(ids)
+                tracks = await self._ensure_media_assets(tracks)
+                if self._needs_apple_fallback(tracks):
+                    tracks = []  # Force Apple fallback when assets are missing
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.warning("Spotify search failed (%s), falling back to Apple", exc)
+                tracks = []
+
+        if not tracks:
+            tracks = await self.apple.search_tracks(query, limit=limit)
+            source = "apple"
+
+        return tracks, features, source
+
+    async def get_recommendations(
+        self,
+        seed: str,
+        *,
+        limit: int = 5,
+        track_name: Optional[str] = None,
+        artist_name: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], str]:
+        """Get recommendation list plus the provider source."""
+        provider, track_id = self._parse_seed(seed)
+        source = "apple"
+        recommendations: List[Dict[str, Any]] = []
+
+        if provider == "spotify" and self.spotify and not self.spotify.demo_mode:
+            try:
+                recommendations = await self.spotify.get_recommendations([track_id], limit=limit)
+                recommendations = await self._ensure_media_assets(recommendations)
+                source = "spotify"
+                if self._needs_apple_fallback(recommendations):
+                    recommendations = []
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Spotify recommendations failed (%s); using Apple fallback", exc)
+                recommendations = []
+
+        if not recommendations:
+            recommendations = await self.apple.get_related_tracks(
+                track_id=track_id if provider == "apple" else None,
+                track_name=track_name,
+                artist_name=artist_name,
+                limit=limit,
+            )
+            source = "apple"
+
+        if not recommendations and self.apple:
+            fallback_query = artist_name or track_name
+            if fallback_query:
+                recommendations = await self.apple.search_tracks(fallback_query, limit=limit)
+                if provider == "apple" and track_id:
+                    recommendations = [t for t in recommendations if t.get("id") != track_id]
+                recommendations = recommendations[:limit]
+                source = "apple"
+
+        return recommendations, source
+
+    async def _ensure_media_assets(self, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not tracks or not self.apple:
+            return tracks
+
+        tasks = []
+        for track in tracks:
+            if track.get("provider") == "apple":
+                continue
+            if track.get("preview_url") and track.get("image_url"):
+                continue
+            tasks.append(self.apple.enrich_track(track))
+
+        if tasks:
+            await asyncio.gather(*tasks)
+        return tracks
+
+    @staticmethod
+    def _parse_seed(seed: str) -> Tuple[str, str]:
+        if not seed:
+            return "", ""
+
+        parts = seed.split(":")
+        if len(parts) >= 2:
+            scheme = parts[0].lower()
+            identifier = parts[-1]
+            if scheme == "spotify":
+                return "spotify", identifier
+            if scheme in {"itunes", "apple"}:
+                return "apple", identifier
+        return "", seed
+
+    @staticmethod
+    def _needs_apple_fallback(tracks: List[Dict[str, Any]]) -> bool:
+        if not tracks:
+            return True
+        return all(
+            (not t.get("preview_url") and not t.get("image_url"))
+            for t in tracks
+        )

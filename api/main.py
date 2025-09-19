@@ -19,6 +19,7 @@ from slowapi.errors import RateLimitExceeded
 
 from api.routers import search
 from services.spotify.client import SpotifyClient
+from services.music.service import MusicService
 from api.models import HealthResponse
 
 # Configure logging
@@ -35,15 +36,20 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Music Recommendation API v0.1.0")
 
     # Initialize Spotify client
-    app.state.spotify = SpotifyClient()
-    await app.state.spotify.start()
+    spotify_client = SpotifyClient()
+    music_service = MusicService(spotify=spotify_client)
+    await music_service.start()
+
+    app.state.spotify = spotify_client
+    app.state.music = music_service
+    logger.info("Spotify demo_mode=%s", spotify_client.demo_mode)
 
     try:
         yield
     finally:
         # Clean shutdown
         logger.info("Shutting down Music Recommendation API")
-        await app.state.spotify.close()
+        await app.state.music.close()
 
 
 # Initialize rate limiter
@@ -102,10 +108,12 @@ async def security_headers(request: Request, call_next):
     # Content Security Policy (temporary inline allowed for existing script)
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' https: data: *.scdn.co; "
+        "img-src 'self' https: data: *.scdn.co i.scdn.co *.spotifycdn.com *.mzstatic.com; "
+        "media-src 'self' https: p.scdn.co *.scdn.co *.spotifycdn.com audio-ssl.itunes.apple.com; "
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
-        "connect-src 'self';"
+        "connect-src 'self'; "
+        "frame-src https: open.spotify.com;"
     )
 
     return response
@@ -163,3 +171,5 @@ async def api_info():
             "health": "/health"
         }
     }
+
+
