@@ -35,8 +35,8 @@ class SpotifyClient:
         self._token_expiry: Optional[datetime] = None
 
         # Caching with thread-safe TTL cache
-        self._search_cache = TTLCache(maxsize=500, ttl=60)
-        self._features_cache = TTLCache(maxsize=5000, ttl=3600)
+        self._search_cache = TTLCache(maxsize=2000, ttl=300)  # 2k searches, 5min
+        self._features_cache = TTLCache(maxsize=10000, ttl=7200)  # 10k features, 2hrs
         self._cache_lock = asyncio.Lock()
 
         # Rate limiting
@@ -206,16 +206,52 @@ class SpotifyClient:
             return self._fallback_audio_features()
 
     async def get_tracks_features_bulk(self, track_ids: List[str]) -> Dict[str, Any]:
-        """Get audio features for multiple tracks."""
+        """Get audio features for multiple tracks using batch API."""
         if self.demo_mode:
             return {track_id: self._fallback_audio_features() for track_id in track_ids}
 
-        # For simplicity, get features one by one (could be optimized with batch API)
+        if not track_ids:
+            return {}
+
         features_dict = {}
+
+        # Check cache first
+        uncached_ids = []
         for track_id in track_ids:
-            features = await self.get_track_features(track_id)
-            if features:
-                features_dict[track_id] = features
+            cached = await self._cache_get(self._features_cache, track_id)
+            if cached is not None:
+                features_dict[track_id] = cached
+            else:
+                uncached_ids.append(track_id)
+
+        if not uncached_ids:
+            return features_dict
+
+        # Batch fetch uncached features (API supports up to 100 IDs)
+        try:
+            for i in range(0, len(uncached_ids), 100):
+                batch = uncached_ids[i:i + 100]
+                ids_param = ",".join(batch)
+
+                resp = await self._request("GET", "https://api.spotify.com/v1/audio-features",
+                                          params={"ids": ids_param})
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for features in data.get("audio_features", []):
+                        if features:  # API returns null for tracks without features
+                            track_id = features.get("id")
+                            features_dict[track_id] = features
+                            await self._cache_set(self._features_cache, track_id, features)
+
+        except httpx.HTTPError as exc:
+            logger.warning("Batch features fetch failed (%s), falling back to individual fetches", exc)
+            # Fallback to individual fetches for remaining uncached
+            for track_id in uncached_ids:
+                if track_id not in features_dict:
+                    features = await self.get_track_features(track_id)
+                    if features:
+                        features_dict[track_id] = features
 
         return features_dict
 

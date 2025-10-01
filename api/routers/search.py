@@ -2,6 +2,7 @@
 
 import time
 import logging
+import random
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -164,9 +165,12 @@ async def get_recommendations(
                 if features_data:
                     audio_features = AudioFeatures(**features_data)
                     explanation = _explain(features_data)
-                base_similarity = 0.95 - (idx * 0.03)
-                popularity_boost = (track_dict.get("popularity", 50) / 100) * 0.1
-                similarity_score = min(0.98, base_similarity + popularity_boost)
+
+                # More natural diversity - exponential decay with variance
+                base_similarity = 0.92 - (idx * 0.05) - (idx ** 1.3 * 0.01)
+                popularity_boost = (track_dict.get("popularity", 50) / 100) * 0.08
+                diversity_variance = random.uniform(-0.02, 0.02)
+                similarity_score = max(0.65, min(0.96, base_similarity + popularity_boost + diversity_variance))
                 rank_score = 0.882
                 explanation_dict = {
                     "top_factors": explanation,
@@ -178,7 +182,10 @@ async def get_recommendations(
                 if artist_name and track_dict.get("artist") and track_dict["artist"].lower() == artist_name.lower():
                     metadata_hints.insert(0, f"Artist match: {track_dict['artist']}")
 
-                similarity_score = max(0.72, min(0.9, 0.88 - idx * 0.04))
+                # Add variance to Apple recommendations too
+                base_similarity = 0.85 - (idx * 0.06)
+                diversity_variance = random.uniform(-0.03, 0.03)
+                similarity_score = max(0.68, min(0.89, base_similarity + diversity_variance))
                 rank_score = 0.62
                 explanation_dict = {
                     "top_factors": metadata_hints[:3],

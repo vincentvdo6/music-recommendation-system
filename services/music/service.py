@@ -62,8 +62,6 @@ class MusicService:
                     ids = [track["id"] for track in tracks]
                     features = await self.spotify.get_tracks_features_bulk(ids)
                 tracks = await self._ensure_media_assets(tracks)
-                if self._needs_apple_fallback(tracks):
-                    tracks = []  # Force Apple fallback when assets are missing
             except Exception as exc:  # pragma: no cover - defensive fallback
                 logger.warning("Spotify search failed (%s), falling back to Apple", exc)
                 tracks = []
@@ -92,8 +90,6 @@ class MusicService:
                 recommendations = await self.spotify.get_recommendations([track_id], limit=limit)
                 recommendations = await self._ensure_media_assets(recommendations)
                 source = "spotify"
-                if self._needs_apple_fallback(recommendations):
-                    recommendations = []
             except Exception as exc:  # pragma: no cover
                 logger.warning("Spotify recommendations failed (%s); using Apple fallback", exc)
                 recommendations = []
@@ -162,11 +158,3 @@ class MusicService:
                 return "apple", identifier
         return "", seed
 
-    @staticmethod
-    def _needs_apple_fallback(tracks: List[Dict[str, Any]]) -> bool:
-        if not tracks:
-            return True
-        return all(
-            (not t.get("preview_url") and not t.get("image_url"))
-            for t in tracks
-        )
