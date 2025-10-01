@@ -762,6 +762,47 @@
   <script>
     const API_BASE = window.location.origin;
 
+    // User ID for personalization (stored in localStorage)
+    function getUserId() {
+      let userId = localStorage.getItem('music_rec_user_id');
+      if (!userId) {
+        userId = 'user_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        localStorage.setItem('music_rec_user_id', userId);
+        console.log('Generated new user ID:', userId);
+      }
+      return userId;
+    }
+
+    // Get time of day context
+    function getTimeOfDay() {
+      const hour = new Date().getHours();
+      if (hour >= 6 && hour < 12) return 'morning';
+      if (hour >= 12 && hour < 17) return 'afternoon';
+      if (hour >= 17 && hour < 22) return 'evening';
+      return 'night';
+    }
+
+    // Track user interaction with backend
+    async function trackInteraction(trackId, interaction, trackName, artistName) {
+      try {
+        const params = new URLSearchParams({
+          user_id: getUserId(),
+          track_id: trackId,
+          interaction: interaction
+        });
+        if (trackName) params.set('track_name', trackName);
+        if (artistName) params.set('artist_name', artistName);
+
+        await fetch(`${API_BASE}/api/v1/track-interaction?${params.toString()}`, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' }
+        });
+        console.log(`Tracked ${interaction}:`, trackId);
+      } catch (error) {
+        console.warn('Failed to track interaction:', error);
+      }
+    }
+
     // Safe DOM helpers to prevent XSS
     function el(tag, className, text) {
       const e = document.createElement(tag);
@@ -782,6 +823,7 @@
     // Audio player functionality
     let isPlaying = false;
     let currentAudio = null;
+    let currentRecommendation = null; // Store current recommendation for tracking
 
     // Safe API helper
     async function apiGet(path) {
@@ -857,8 +899,11 @@
       embed.style.display = 'block';
     }
 
-    function initializeAudioPlayer(previewUrl, trackName, trackId) {
+    function initializeAudioPlayer(previewUrl, trackName, trackId, artistName) {
       const embed = document.getElementById('spotifyEmbed');
+
+      // Store current recommendation
+      currentRecommendation = { id: trackId, name: trackName, artist: artistName };
 
       if (previewUrl) {
         embed.style.display = 'none';
@@ -887,6 +932,16 @@
       if (isPlaying) {
         audioPlayer.pause();
       } else {
+        // Track that user played the recommended track
+        if (currentRecommendation) {
+          trackInteraction(
+            currentRecommendation.id,
+            'play',
+            currentRecommendation.name,
+            currentRecommendation.artist
+          );
+        }
+
         audioPlayer.play().catch(e => {
           console.warn('Playback failed:', e);
           previewTitle.textContent = 'Playback not available';
@@ -1151,14 +1206,19 @@
     async function handleRecommendation(inputTrack) {
       try {
         hideSuggestions();
-        
-        // Get recommendation based on the input track
+
+        // Get personalized recommendation with context
         const params = new URLSearchParams({
           seed: inputTrack.uri || inputTrack.id || '',
-          limit: '1'
+          limit: '1',
+          user_id: getUserId(),
+          time_of_day: getTimeOfDay()
         });
         if (inputTrack.name) params.set('track_name', inputTrack.name);
         if (inputTrack.artist) params.set('artist_name', inputTrack.artist);
+
+        // Track that user searched for this track
+        trackInteraction(inputTrack.id || inputTrack.uri, 'play', inputTrack.name, inputTrack.artist);
 
         const recData = await apiGet(`${API_BASE}/api/v1/recommendations?${params.toString()}`);
         
@@ -1198,8 +1258,13 @@
         similarityScore.textContent = `${Math.round(similarity)}%`;
         similarityFill.style.width = `${similarity}%`;
 
-        // Initialize audio player
-        initializeAudioPlayer(recommendation.preview_url, recommendation.name, recommendation.id);
+        // Initialize audio player with artist name for tracking
+        initializeAudioPlayer(
+          recommendation.preview_url,
+          recommendation.name,
+          recommendation.id,
+          recommendation.artist
+        );
 
         // Spotify link
         const external = recommendation.external_urls || {};
