@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
     finally:
         # Clean shutdown
         logger.info("Shutting down Music Recommendation API")
+        app.state.music.save_recommendation_state()
         await app.state.music.close()
 
 

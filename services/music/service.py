@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from services.apple.client import AppleMusicClient
 from services.spotify.client import SpotifyClient
+from services.recommendation.hybrid_engine import HybridRecommendationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class MusicService:
     ) -> None:
         self.spotify = spotify
         self.apple = apple or AppleMusicClient()
+        self.hybrid_engine = HybridRecommendationEngine(spotify) if spotify else None
 
     async def start(self) -> None:
         tasks = []
@@ -79,13 +81,38 @@ class MusicService:
         limit: int = 5,
         track_name: Optional[str] = None,
         artist_name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Get recommendation list plus the provider source."""
         provider, track_id = self._parse_seed(seed)
         source = "apple"
         recommendations: List[Dict[str, Any]] = []
 
-        if provider == "spotify" and self.spotify and not self.spotify.demo_mode:
+        # Try hybrid personalized recommendations if user_id provided
+        if user_id and self.hybrid_engine:
+            try:
+                # Get seed track features if available
+                seed_features = None
+                if track_id and self.spotify and not self.spotify.demo_mode:
+                    seed_features = await self.spotify.get_track_features(track_id)
+
+                recommendations = await self.hybrid_engine.get_personalized_recommendations(
+                    user_id=user_id,
+                    seed_track_id=track_id if provider == "spotify" else None,
+                    seed_features=seed_features,
+                    limit=limit,
+                    context=context,
+                )
+                recommendations = await self._ensure_media_assets(recommendations)
+                source = "hybrid"
+                logger.info("Hybrid recommendations generated: %d tracks", len(recommendations))
+            except Exception as exc:
+                logger.warning("Hybrid recommendations failed (%s), falling back", exc)
+                recommendations = []
+
+        # Fallback to basic Spotify recommendations
+        if not recommendations and provider == "spotify" and self.spotify and not self.spotify.demo_mode:
             try:
                 recommendations = await self.spotify.get_recommendations([track_id], limit=limit)
                 recommendations = await self._ensure_media_assets(recommendations)
@@ -94,6 +121,7 @@ class MusicService:
                 logger.warning("Spotify recommendations failed (%s); using Apple fallback", exc)
                 recommendations = []
 
+        # Fallback to Apple Music
         if not recommendations:
             if provider == "spotify" and (track_name or artist_name):
                 recommendations = await self.apple.get_related_tracks(
@@ -126,6 +154,22 @@ class MusicService:
             source = "apple"
 
         return recommendations, source
+
+    def track_user_interaction(
+        self,
+        user_id: str,
+        track_id: str,
+        interaction_type: str,
+        track_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Track user interactions for personalization."""
+        if self.hybrid_engine:
+            self.hybrid_engine.track_interaction(user_id, track_id, interaction_type, track_data)
+
+    def save_recommendation_state(self) -> None:
+        """Save recommendation engine state."""
+        if self.hybrid_engine:
+            self.hybrid_engine.save_state()
 
     async def _ensure_media_assets(self, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not tracks or not self.apple:

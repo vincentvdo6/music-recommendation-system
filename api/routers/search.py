@@ -136,13 +136,23 @@ async def get_recommendations(
     limit: int = Query(5, ge=1, le=20, description="Number of recommendations"),
     track_name: Optional[str] = Query(None, description="Seed track name for non-Spotify IDs"),
     artist_name: Optional[str] = Query(None, description="Seed artist name for non-Spotify IDs"),
+    user_id: Optional[str] = Query(None, description="User ID for personalized recommendations"),
+    time_of_day: Optional[str] = Query(None, description="Context: morning/afternoon/evening/night"),
+    mood: Optional[str] = Query(None, description="Context: upbeat/calm/energetic"),
 ):
-    """Get song recommendations based on a seed track."""
+    """Get song recommendations based on a seed track with optional personalization."""
     start_time = time.time()
     request_id = getattr(request.state, "request_id", "unknown")
 
     music_service = request.app.state.music
     spotify_client: Optional[SpotifyClient] = getattr(request.app.state, "spotify", None)
+
+    # Build context dict
+    context = {}
+    if time_of_day:
+        context["time_of_day"] = time_of_day
+    if mood:
+        context["mood"] = mood
 
     try:
         recommendations_data, source = await music_service.get_recommendations(
@@ -150,6 +160,8 @@ async def get_recommendations(
             limit=limit,
             track_name=track_name,
             artist_name=artist_name,
+            user_id=user_id,
+            context=context if context else None,
         )
 
         logger.info(f"Recommendations source: {source}, count: {len(recommendations_data)}, demo_mode: {spotify_client.demo_mode if spotify_client else 'N/A'}")
@@ -206,7 +218,9 @@ async def get_recommendations(
         processing_time = int((time.time() - start_time) * 1000)
 
         algorithm = (
-            "Spotify Web API + Audio Feature Analysis"
+            "Hybrid (Collaborative + Content-Based + Context-Aware)"
+            if source == "hybrid"
+            else "Spotify Web API + Audio Feature Analysis"
             if source == "spotify"
             else "Apple Music catalog similarity"
         )
@@ -224,3 +238,38 @@ async def get_recommendations(
     except Exception as exc:  # pragma: no cover - defensive catch
         logger.error("Recommendations failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Recommendations failed: {str(exc)}")
+
+
+@router.post("/track-interaction")
+@limiter.limit("100/minute")
+async def track_interaction(
+    request: Request,
+    user_id: str = Query(..., description="User ID"),
+    track_id: str = Query(..., description="Track ID"),
+    interaction: str = Query(..., description="Interaction type: play/like/skip"),
+    track_name: Optional[str] = Query(None),
+    artist_name: Optional[str] = Query(None),
+):
+    """Track user interaction with a track for personalization."""
+    music_service = request.app.state.music
+
+    valid_interactions = {"play", "like", "skip"}
+    if interaction not in valid_interactions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid interaction type. Must be one of: {', '.join(valid_interactions)}"
+        )
+
+    track_data = {
+        "name": track_name,
+        "artist": artist_name,
+    }
+
+    music_service.track_user_interaction(user_id, track_id, interaction, track_data)
+
+    return {
+        "status": "success",
+        "user_id": user_id,
+        "track_id": track_id,
+        "interaction": interaction,
+    }
