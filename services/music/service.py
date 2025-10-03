@@ -26,6 +26,11 @@ class MusicService:
         self.apple = apple or AppleMusicClient()
         self.hybrid_engine = HybridRecommendationEngine(spotify) if spotify else None
 
+        if self.hybrid_engine:
+            logger.info("✓ Hybrid recommendation engine initialized")
+        else:
+            logger.warning("✗ Hybrid engine disabled (no Spotify client)")
+
     async def start(self) -> None:
         tasks = []
         if self.spotify:
@@ -91,11 +96,13 @@ class MusicService:
 
         # Try hybrid personalized recommendations if user_id provided
         if user_id and self.hybrid_engine:
+            logger.info("Using hybrid engine for user %s (seed: %s)", user_id[:12], seed[:30])
             try:
                 # Get seed track features if available
                 seed_features = None
                 if track_id and self.spotify and not self.spotify.demo_mode:
                     seed_features = await self.spotify.get_track_features(track_id)
+                    logger.info("Fetched seed track features for hybrid engine")
 
                 recommendations = await self.hybrid_engine.get_personalized_recommendations(
                     user_id=user_id,
@@ -106,7 +113,7 @@ class MusicService:
                 )
                 recommendations = await self._ensure_media_assets(recommendations)
                 source = "hybrid"
-                logger.info("Hybrid recommendations generated: %d tracks", len(recommendations))
+                logger.info("✓ Hybrid engine returned %d recommendations", len(recommendations))
             except Exception as exc:
                 logger.warning("Hybrid recommendations failed (%s), falling back", exc)
                 recommendations = []

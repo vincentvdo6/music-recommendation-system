@@ -183,7 +183,7 @@ async def get_recommendations(
                 popularity_boost = (track_dict.get("popularity", 50) / 100) * 0.08
                 diversity_variance = random.uniform(-0.02, 0.02)
                 similarity_score = max(0.65, min(0.96, base_similarity + popularity_boost + diversity_variance))
-                rank_score = 0.882
+                rank_score = similarity_score  # Use actual computed similarity
                 explanation_dict = {
                     "top_factors": explanation,
                     "similarity_reason": "Based on audio features and listening patterns",
@@ -198,7 +198,7 @@ async def get_recommendations(
                 base_similarity = 0.85 - (idx * 0.06)
                 diversity_variance = random.uniform(-0.03, 0.03)
                 similarity_score = max(0.68, min(0.89, base_similarity + diversity_variance))
-                rank_score = 0.62
+                rank_score = similarity_score  # Use actual computed similarity
                 explanation_dict = {
                     "top_factors": metadata_hints[:3],
                     "similarity_reason": "Curated via Apple Music catalog",

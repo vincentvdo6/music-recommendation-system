@@ -692,8 +692,17 @@
           <img id="recArtwork" src="" alt="Album artwork" />
         </div>
         <div class="track-info">
-          <h2 class="track-title" id="recTitle">—</h2>
-          <p class="track-artist" id="recArtist">—</p>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div style="flex: 1;">
+              <h2 class="track-title" id="recTitle">—</h2>
+              <p class="track-artist" id="recArtist">—</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <button onclick="prevRecommendation()" style="background: #2a2a2a; border: 1px solid rgba(255,255,255,0.1); color: #f5f5f5; border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.875rem;">← Prev</button>
+              <span id="recCounter" style="color: #a3a3a3; font-size: 0.75rem; display: none;"></span>
+              <button onclick="nextRecommendation()" style="background: #2a2a2a; border: 1px solid rgba(255,255,255,0.1); color: #f5f5f5; border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.875rem;">Next →</button>
+            </div>
+          </div>
           <div class="tags" id="recTags"></div>
           
           <div class="similarity">
@@ -1203,14 +1212,18 @@
       }
     }
 
+    // Store recommendations for cycling
+    let allRecommendations = [];
+    let currentRecIndex = 0;
+
     async function handleRecommendation(inputTrack) {
       try {
         hideSuggestions();
 
-        // Get personalized recommendation with context
+        // Get personalized recommendations with context
         const params = new URLSearchParams({
           seed: inputTrack.uri || inputTrack.id || '',
-          limit: '1',
+          limit: '10',
           user_id: getUserId(),
           time_of_day: getTimeOfDay()
         });
@@ -1221,12 +1234,20 @@
         trackInteraction(inputTrack.id || inputTrack.uri, 'play', inputTrack.name, inputTrack.artist);
 
         const recData = await apiGet(`${API_BASE}/api/v1/recommendations?${params.toString()}`);
-        
+
         if (!recData.recommendations || !recData.recommendations[0]) {
           throw new Error('No recommendations found');
         }
 
-        const recommendation = recData.recommendations[0];
+        // Store all recommendations
+        allRecommendations = recData.recommendations;
+        currentRecIndex = 0;
+
+        console.log(`Got ${allRecommendations.length} recommendations, showing #1`);
+        console.log('Algorithm:', recData.algorithm);
+        console.log('Source:', recData.source);
+
+        const recommendation = allRecommendations[currentRecIndex];
         
         // Update UI
         inputSummary.textContent = `${inputTrack.name} — ${inputTrack.artist}`;
@@ -1281,6 +1302,9 @@
           spotifyLink.textContent = 'Open in Spotify';
         }
 
+        // Update recommendation counter
+        updateRecCounter();
+
         // Show results
         resultSection.classList.remove('hidden');
         resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1288,6 +1312,79 @@
       } catch (error) {
         console.error('Recommendation failed:', error);
         alert('Could not get recommendation. Please try again.');
+      }
+    }
+
+    function renderRecommendation(recommendation) {
+      recTitle.textContent = recommendation.name;
+      recArtist.textContent = recommendation.artist;
+
+      const placeholder = 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="100%" height="100%" fill="#1f1f1f"/><text x="50%" y="50%" fill="#999" font-size="24" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle">No Cover</text></svg>`);
+      recArtwork.src = recommendation.image_url || placeholder;
+      recArtwork.referrerPolicy = 'no-referrer';
+
+      // Tags
+      recTags.textContent = '';
+      const tags = [
+        { label: 'Album', value: recommendation.album },
+        { label: 'Popularity', value: `${recommendation.popularity}%` },
+        { label: 'Year', value: new Date(recommendation.release_date || Date.now()).getFullYear() }
+      ].filter(tag => tag.value && tag.value !== 'undefined%');
+
+      tags.forEach(tag => renderTag(recTags, tag));
+
+      // Similarity score
+      const similarity = Math.min(95, Math.max(75, recommendation.similarity_score * 100 || (85 + Math.random() * 10)));
+      similarityScore.textContent = `${Math.round(similarity)}%`;
+      similarityFill.style.width = `${similarity}%`;
+
+      // Initialize audio player
+      initializeAudioPlayer(
+        recommendation.preview_url,
+        recommendation.name,
+        recommendation.id,
+        recommendation.artist
+      );
+
+      // Spotify link
+      const external = recommendation.external_urls || {};
+      spotifyLink.href =
+        external.spotify ||
+        external.appleMusic ||
+        external.itunes ||
+        `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
+      if (external.spotify) {
+        spotifyLink.textContent = 'Open in Spotify';
+      } else if (external.appleMusic || external.itunes) {
+        spotifyLink.textContent = 'Open in Apple Music';
+      } else {
+        spotifyLink.textContent = 'Open in Spotify';
+      }
+
+      updateRecCounter();
+    }
+
+    function nextRecommendation() {
+      if (allRecommendations.length === 0) return;
+      currentRecIndex = (currentRecIndex + 1) % allRecommendations.length;
+      console.log(`Showing recommendation #${currentRecIndex + 1} of ${allRecommendations.length}`);
+      renderRecommendation(allRecommendations[currentRecIndex]);
+    }
+
+    function prevRecommendation() {
+      if (allRecommendations.length === 0) return;
+      currentRecIndex = (currentRecIndex - 1 + allRecommendations.length) % allRecommendations.length;
+      console.log(`Showing recommendation #${currentRecIndex + 1} of ${allRecommendations.length}`);
+      renderRecommendation(allRecommendations[currentRecIndex]);
+    }
+
+    function updateRecCounter() {
+      const counter = document.getElementById('recCounter');
+      if (counter && allRecommendations.length > 1) {
+        counter.textContent = `${currentRecIndex + 1} of ${allRecommendations.length}`;
+        counter.style.display = 'block';
+      } else if (counter) {
+        counter.style.display = 'none';
       }
     }
 

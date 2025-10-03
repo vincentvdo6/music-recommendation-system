@@ -125,7 +125,11 @@ class CachedStatic(StaticFiles):
     async def get_response(self, path, scope):
         resp: Response = await super().get_response(path, scope)
         if resp.status_code == 200:
-            resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+            # Disable caching in development so changes show immediately
+            if ENV == "development":
+                resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            else:
+                resp.headers.setdefault("Cache-Control", "public, max-age=86400")
         return resp
 
 # Mount static files with caching
