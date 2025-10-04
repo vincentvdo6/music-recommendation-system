@@ -5,6 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>One‑Rec — Single Purpose Music Recommendation</title>
   <style>
+    :root {
+      color-scheme: dark;
+      --base-100: #09090b;
+      --base-200: #111113;
+      --base-300: #1c1c21;
+      --text-primary: #f4f4f5;
+      --text-muted: rgba(244,244,245,0.7);
+      --text-soft: rgba(244,244,245,0.4);
+      --border-color: rgba(255,255,255,0.08);
+      --primary: #6366f1;
+      --primary-gradient: linear-gradient(135deg, #6366f1, #d946ef);
+      --primary-10: rgba(99,102,241,0.12);
+      --primary-30: rgba(99,102,241,0.34);
+      --success: #22c55e;
+      --success-10: rgba(34,197,94,0.12);
+      --success-30: rgba(34,197,94,0.34);
+      --shadow-lg: 0 24px 50px rgba(8,8,10,0.5);
+      --radius-lg: 1.25rem;
+      --radius-md: 0.875rem;
+      --gap-3: 0.75rem;
+      --gap-4: 1rem;
+      --gap-6: 1.5rem;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -12,25 +36,76 @@
     }
 
     body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #0a0a0a;
-      color: #f5f5f5;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--base-100);
+      color: var(--text-primary);
       min-height: 100vh;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Header */
+    a {
+      color: inherit;
+    }
+
+    .text-3xl {
+      font-size: 1.875rem;
+      line-height: 1.2;
+    }
+
+    .text-2xl {
+      font-size: 1.5rem;
+      line-height: 1.2;
+    }
+
+    .text-xl {
+      font-size: 1.25rem;
+      line-height: 1.2;
+    }
+
+    .text-lg {
+      font-size: 1.125rem;
+      line-height: 1.45;
+    }
+
+    .text-sm {
+      font-size: 0.875rem;
+    }
+
+    .font-bold {
+      font-weight: 700;
+    }
+
+    .font-semibold {
+      font-weight: 600;
+    }
+
+    .text-primary {
+      color: var(--primary);
+    }
+
+    .opacity-70 {
+      opacity: 0.7;
+    }
+
+    .opacity-80 {
+      opacity: 0.8;
+    }
+
+    .opacity-40 {
+      opacity: 0.4;
+    }
+
     .header {
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border-color);
+      backdrop-filter: blur(10px);
       position: sticky;
       top: 0;
       z-index: 10;
     }
 
     .header-content {
-      max-width: 768px;
+      max-width: 960px;
       margin: 0 auto;
       padding: 1rem;
       display: flex;
@@ -41,25 +116,25 @@
     .logo {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: var(--gap-3);
     }
 
     .logo-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #6366f1, #d946ef);
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      background: var(--primary-gradient);
     }
 
     .logo-text {
-      font-size: 1.125rem;
+      font-size: 1.25rem;
       font-weight: 600;
-      letter-spacing: -0.025em;
+      letter-spacing: -0.02em;
     }
 
     .tagline {
       font-size: 0.75rem;
-      color: #a3a3a3;
+      color: var(--text-soft);
       display: none;
     }
 
@@ -69,529 +144,194 @@
       }
     }
 
-    /* Main content */
     .main {
-      max-width: 768px;
+      max-width: 960px;
       margin: 0 auto;
-      padding: 2.5rem 1rem;
-    }
-
-    /* Hero section */
-    .hero {
-      position: relative;
-      overflow: hidden;
-      border-radius: 1rem;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(23,23,23,0.5);
-      padding: 1.5rem;
-      box-shadow: 0 0 0 1px rgba(255,255,255,0.04);
-    }
-
-    .hero::before {
-      content: '';
-      position: absolute;
-      top: -128px;
-      right: -96px;
-      width: 256px;
-      height: 256px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(217,70,239,0.2));
-      filter: blur(48px);
-      pointer-events: none;
-      opacity: 0.4;
-    }
-
-    .hero h1 {
-      font-size: 1.875rem;
-      font-weight: 600;
-      letter-spacing: -0.025em;
-      position: relative;
-      z-index: 1;
-    }
-
-    .hero p {
-      margin-top: 0.5rem;
-      font-size: 0.875rem;
-      color: #a3a3a3;
-      position: relative;
-      z-index: 1;
-    }
-
-    .hero em {
-      font-style: italic;
-    }
-
-    /* Form */
-    .search-form {
-      margin-top: 1.5rem;
+      padding: 2.5rem 1rem 3rem;
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: var(--gap-6);
+    }
+
+    .card {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+      padding: 1.5rem;
+      background: rgba(20,20,24,0.82);
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-6);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .bg-base-200 {
+      background: var(--base-200);
+    }
+
+    .bg-base-300 {
+      background: var(--base-300);
+    }
+
+    .shadow-lg {
+      box-shadow: var(--shadow-lg);
+    }
+
+    .section-heading {
+      font-size: 1.125rem;
+      font-weight: 600;
+    }
+
+    .input-card p {
+      color: var(--text-muted);
+      max-width: 560px;
+    }
+
+    .search-form {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-3);
       position: relative;
-      z-index: 1;
     }
 
     @media (min-width: 640px) {
       .search-form {
         flex-direction: row;
+        align-items: center;
       }
     }
 
-    .search-input {
+    .search-field {
+      position: relative;
       flex: 1;
-      border-radius: 12px;
-      background: rgba(10,10,10,0.8);
-      padding: 0.75rem 1rem;
-      outline: none;
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #f5f5f5;
-      transition: all 0.2s;
     }
 
-    .search-input:focus {
+    .input {
+      width: 100%;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      background: rgba(10,10,12,0.85);
+      color: var(--text-primary);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input-lg {
+      padding: 0.9rem 1.1rem;
+      font-size: 1rem;
+    }
+
+    .input:focus {
+      outline: none;
       border-color: rgba(99,102,241,0.6);
       box-shadow: 0 0 0 2px rgba(99,102,241,0.2);
     }
 
-    .search-input::placeholder {
-      color: #737373;
-    }
-
-    .search-btn {
-      border-radius: 12px;
-      padding: 0.75rem 1.25rem;
-      font-weight: 500;
-      background: #f5f5f5;
-      color: #0a0a0a;
-      border: 1px solid rgba(255,255,255,0.1);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .search-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .search-btn:not(:disabled):hover {
-      filter: brightness(0.95);
-    }
-
-    /* Examples */
-    .examples {
-      margin-top: 0.75rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.75rem;
-      color: #a3a3a3;
-      position: relative;
-      z-index: 1;
-    }
-
-    .example-btn {
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.1);
-      padding: 0.25rem 0.75rem;
-      background: transparent;
-      color: inherit;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .example-btn:hover {
-      background: rgba(255,255,255,0.05);
-    }
-
-    /* Results */
-    .result-section {
-      margin-top: 2rem;
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 1.5rem;
-      border-radius: 1rem;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(23,23,23,0.5);
-      padding: 1.5rem;
-    }
-
-    @media (min-width: 768px) {
-      .result-section {
-        grid-template-columns: 2fr 3fr;
-      }
-    }
-
-    /* Input summary */
-    .input-summary {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      font-size: 0.875rem;
-      color: #a3a3a3;
-    }
-
-    .input-badge {
+    .btn {
       display: inline-flex;
       align-items: center;
-      gap: 0.5rem;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.1);
-      padding: 0.25rem 0.75rem;
-    }
-
-    .input-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #6366f1;
-    }
-
-    .source-link {
-      text-decoration: none;
-      color: inherit;
-      text-decoration-offset: 2px;
-    }
-
-    .source-link:hover {
-      text-decoration: underline;
-    }
-
-    /* Recommendation card */
-    .rec-card {
-      border-radius: 12px;
-      background: rgba(10,10,10,0.6);
-      border: 1px solid rgba(255,255,255,0.1);
-      padding: 1rem;
-    }
-
-    .artwork {
-      aspect-ratio: 1;
-      width: 100%;
-      overflow: hidden;
-      border-radius: 8px;
-    }
-
-    .artwork img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .track-info {
-      margin-top: 1rem;
-    }
-
-    .track-title {
-      font-size: 1.25rem;
-      font-weight: 600;
-      line-height: 1.2;
-    }
-
-    .track-artist {
-      color: #a3a3a3;
-      margin-top: 0.25rem;
-    }
-
-    .tags {
-      margin-top: 0.75rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .tag {
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.1);
-      padding: 0.25rem 0.625rem;
-      font-size: 0.75rem;
-      color: #d4d4d4;
-    }
-
-    .tag-label {
-      color: #737373;
-      margin-right: 0.25rem;
-    }
-
-    /* Similarity */
-    .similarity {
-      margin-top: 1rem;
-    }
-
-    .similarity-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 0.75rem;
-      color: #a3a3a3;
-    }
-
-    .similarity-score {
-      font-weight: 500;
-      color: #e5e5e5;
-    }
-
-    .similarity-bar {
-      margin-top: 0.25rem;
-      height: 8px;
-      width: 100%;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.1);
-      overflow: hidden;
-    }
-
-    .similarity-fill {
-      height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #6366f1, #d946ef);
-    }
-
-    /* Controls */
-    .controls {
-      margin-top: 1rem;
-    }
-
-    .audio-player {
-      width: 100%;
-      margin-bottom: 0.5rem;
-    }
-
-    .cta-buttons {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .cta-btn {
-      flex: 1;
-      border-radius: 12px;
-      padding: 0.5rem 1rem;
-      text-align: center;
-      font-weight: 500;
-      text-decoration: none;
-      border: 1px solid rgba(255,255,255,0.1);
-      transition: all 0.2s;
-    }
-
-    .cta-btn.primary {
-      background: #f5f5f5;
-      color: #0a0a0a;
-    }
-
-    .cta-btn.secondary {
-      background: #e5e5e5;
-      color: #171717;
-    }
-
-    .cta-btn:hover {
-      filter: brightness(0.95);
-    }
-
-    /* Explanation */
-    .explanation {
-      border-radius: 12px;
-      background: rgba(10,10,10,0.6);
-      border: 1px solid rgba(255,255,255,0.1);
-      padding: 1rem;
-    }
-
-    .explanation-header {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .explanation-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #d946ef;
-    }
-
-    .explanation-title {
-      font-size: 0.875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #d4d4d4;
-    }
-
-    .play-preview {
-      background: #1a1a1a;
-      border-radius: 12px;
-      padding: 1.5rem;
-      border: 1px solid #2a2a2a;
-    }
-
-    .play-header {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1rem;
-    }
-
-    .play-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
-      flex-shrink: 0;
-    }
-
-    .play-title {
-      margin: 0;
-      font-size: 1rem;
-      font-weight: 600;
-      color: #ffffff;
-    }
-
-    .player-controls {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 1rem;
-      background: #262626;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-    }
-
-    .play-btn {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
-      border: none;
-      display: flex;
-      align-items: center;
       justify-content: center;
-      cursor: pointer;
-      font-size: 18px;
-      color: #000;
-      transition: all 0.2s ease;
-      flex-shrink: 0;
-    }
-
-    .play-btn:hover {
-      transform: scale(1.05);
-      box-shadow: 0 0 20px rgba(29, 185, 84, 0.3);
-    }
-
-    .play-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-    }
-
-    .track-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .track-preview-title {
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: #ffffff;
-      margin-bottom: 0.25rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .track-duration {
-      font-size: 0.75rem;
-      color: #a3a3a3;
-    }
-
-    .volume-control {
-      display: flex;
-      align-items: center;
       gap: 0.5rem;
-      flex-shrink: 0;
-    }
-
-    .volume-icon {
-      font-size: 16px;
-      color: #a3a3a3;
-    }
-
-    .volume-slider {
-      width: 80px;
-      height: 4px;
-      background: #404040;
-      outline: none;
-      border-radius: 2px;
-      -webkit-appearance: none;
-    }
-
-    .volume-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 12px;
-      height: 12px;
-      background: #1db954;
-      border-radius: 50%;
+      border-radius: var(--radius-md);
+      border: 1px solid transparent;
+      font-weight: 600;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease;
       cursor: pointer;
+      line-height: 1;
     }
 
-    .volume-slider::-moz-range-thumb {
-      width: 12px;
-      height: 12px;
-      background: #1db954;
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    .btn:not(:disabled):hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-lg {
+      padding: 0.9rem 1.75rem;
+      font-size: 1rem;
+    }
+
+    .btn-sm {
+      padding: 0.45rem 0.9rem;
+      font-size: 0.875rem;
+      border-radius: 999px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #0a0a0a;
+      box-shadow: 0 10px 30px rgba(99,102,241,0.35);
+    }
+
+    .btn-primary:not(:disabled):hover {
+      box-shadow: 0 14px 40px rgba(99,102,241,0.45);
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--text-muted);
+      border-color: var(--border-color);
+    }
+
+    .btn-outline:not(:disabled):hover {
+      border-color: rgba(148,163,184,0.4);
+      background: rgba(148,163,184,0.12);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border-color: rgba(255,255,255,0.04);
+    }
+
+    .btn-ghost:not(:disabled):hover {
+      background: rgba(255,255,255,0.06);
+      color: var(--text-primary);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: #062c12;
+      box-shadow: 0 12px 28px rgba(34,197,94,0.38);
+    }
+
+    .btn-success:not(:disabled):hover {
+      box-shadow: 0 16px 36px rgba(34,197,94,0.45);
+    }
+
+    .btn-circle {
+      width: 64px;
+      height: 64px;
       border-radius: 50%;
-      cursor: pointer;
-      border: none;
     }
 
-    .note {
-      margin-top: 1.5rem;
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(23,23,23,0.5);
-      padding: 0.75rem;
-      font-size: 0.75rem;
-      color: #a3a3a3;
+    .w-20 {
+      width: 5rem;
     }
 
-    /* Footer */
-    .footer {
-      margin-top: 2.5rem;
-      padding-bottom: 2rem;
-      text-align: center;
-      font-size: 0.75rem;
-      color: #737373;
-    }
-
-    /* Loading states */
-    .loading {
-      opacity: 0.7;
-      pointer-events: none;
-    }
-
-    .hidden {
-      display: none;
-    }
-
-    /* Live search suggestions */
     .suggestions {
       position: absolute;
-      top: 100%;
+      top: calc(100% + 0.25rem);
       left: 0;
       right: 0;
-      background: rgba(10,10,10,0.95);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 12px;
-      margin-top: 0.25rem;
-      z-index: 20;
+      background: rgba(14,14,18,0.95);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
       max-height: 300px;
       overflow-y: auto;
+      z-index: 20;
+      box-shadow: var(--shadow-lg);
     }
 
     .suggestion {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: var(--gap-3);
       padding: 0.75rem;
       cursor: pointer;
-      transition: all 0.2s;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      transition: background 0.2s ease;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
     }
 
     .suggestion:last-child {
@@ -606,17 +346,12 @@
     .suggestion img {
       width: 40px;
       height: 40px;
-      border-radius: 6px;
+      border-radius: 8px;
       object-fit: cover;
     }
 
-    .suggestion-info {
-      flex: 1;
-      min-width: 0;
-    }
-
     .suggestion-title {
-      font-weight: 500;
+      font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -624,10 +359,367 @@
 
     .suggestion-artist {
       font-size: 0.875rem;
-      color: #a3a3a3;
+      color: var(--text-soft);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .examples {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .example-btn {
+      border: none;
+      background: none;
+      padding: 0;
+      font: inherit;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      padding: 0.35rem 0.85rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .badge-lg {
+      padding: 0.45rem 1rem;
+      font-size: 0.875rem;
+    }
+
+    .badge-outline {
+      border-color: var(--border-color);
+      color: var(--text-muted);
+      background: transparent;
+    }
+
+    .badge-outline:hover {
+      background: var(--primary-10);
+      border-color: var(--primary);
+      color: var(--text-primary);
+    }
+
+    .badge-primary {
+      background: var(--primary-10);
+      border-color: var(--primary-30);
+      color: var(--text-primary);
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap-3);
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .animate-pulse {
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 0.55;
+        transform: scale(0.9);
+      }
+      50% {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .rec-layout {
+      display: grid;
+      gap: var(--gap-6);
+      grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 960px) {
+      .rec-layout {
+        grid-template-columns: 280px minmax(0, 1fr);
+      }
+    }
+
+    .album-stack {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-3);
+      align-items: center;
+    }
+
+    .album-art {
+      width: min(280px, 100%);
+      aspect-ratio: 1 / 1;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--base-300);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .album-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .nav-buttons {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--gap-3);
+    }
+
+    .pagination-badge {
+      justify-content: center;
+      min-width: 6.5rem;
+    }
+
+    .track-stack {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-6);
+    }
+
+    .title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .track-title {
+      font-size: 1.875rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .track-artist {
+      font-size: 1.25rem;
+      color: rgba(244,244,245,0.8);
+    }
+
+    .metadata-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: var(--gap-3);
+    }
+
+    @media (max-width: 639px) {
+      .metadata-grid {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+      }
+    }
+
+    .stat-card {
+      background: var(--base-300);
+      border-radius: var(--radius-md);
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-soft);
+    }
+
+    .stat-value {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      word-break: break-word;
+    }
+
+    .similarity-card {
+      border-radius: var(--radius-md);
+      padding: 1rem;
+      background: var(--primary-10);
+      border: 1px solid var(--primary-30);
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-3);
+    }
+
+    .similarity-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: var(--gap-3);
+    }
+
+    .similarity-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .progress {
+      position: relative;
+      width: 100%;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+
+    .progress.h-2 {
+      height: 8px;
+    }
+
+    .progress-primary {
+      background: rgba(99,102,241,0.2);
+    }
+
+    .progress-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      border-radius: inherit;
+      background: var(--primary);
+    }
+
+    .preview-card {
+      border-radius: var(--radius-md);
+      padding: 1rem;
+      background: var(--success-10);
+      border: 1px solid var(--success-30);
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-3);
+    }
+
+    .preview-layout {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--gap-3);
+    }
+
+    .preview-info {
+      flex: 1 1 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    .preview-title {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .preview-duration {
+      font-size: 0.875rem;
+      color: var(--text-soft);
+    }
+
+    .volume-control {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .volume-label {
+      font-size: 1rem;
+      color: var(--text-soft);
+    }
+
+    .range {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.15);
+      outline: none;
+    }
+
+    .range-success {
+      background: rgba(34,197,94,0.25);
+    }
+
+    .range-xs {
+      height: 4px;
+    }
+
+    .range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--success);
+      cursor: pointer;
+    }
+
+    .range::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--success);
+      border: none;
+      cursor: pointer;
+    }
+
+    .preview-description {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .cta-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--gap-3);
+    }
+
+    .cta-buttons a {
+      flex: 1 1 200px;
+      justify-content: center;
+    }
+
+    .embed-container {
+      width: 100%;
+      margin-top: 0.75rem;
+    }
+
+    .footer {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--text-soft);
+      padding-bottom: 2rem;
+      margin-top: 1rem;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .loading {
+      opacity: 0.7;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -645,18 +737,19 @@
 
   <!-- Main -->
   <main class="main">
-    <!-- Hero / Input -->
-    <section class="hero">
-      <h1>One input. One recommendation.</h1>
-      <p>
-        Search for any song and get <em>the</em> best next listen.
-        No lists, no feeds, no rabbit holes — just one perfect match.
-      </p>
+    <section class="card bg-base-200 shadow-lg input-card">
+      <div class="title-group">
+        <h1 class="text-3xl font-bold">One input. One recommendation.</h1>
+        <p>
+          Search for any song and get <em>the</em> best next listen.
+          No lists, no feeds, no rabbit holes — just one perfect match.
+        </p>
+      </div>
 
       <form class="search-form" id="searchForm">
-        <div style="position: relative; flex: 1;">
+        <div class="search-field">
           <input
-            class="search-input"
+            class="input input-lg"
             id="songInput"
             type="text"
             placeholder="Search for a song... e.g., 'Ivy Frank Ocean'"
@@ -664,109 +757,91 @@
           />
           <div class="suggestions hidden" id="suggestions"></div>
         </div>
-        <button type="submit" class="search-btn" id="searchBtn">
+        <button type="submit" class="btn btn-primary btn-lg" id="searchBtn">
           Get recommendation
         </button>
       </form>
 
       <div class="examples">
         <span>Try:</span>
-        <button type="button" class="example-btn" data-example="Ivy Frank Ocean">Ivy — Frank Ocean</button>
-        <button type="button" class="example-btn" data-example="Blinding Lights The Weeknd">Blinding Lights</button>
-        <button type="button" class="example-btn" data-example="drivers license olivia rodrigo">drivers license</button>
+        <button type="button" class="badge badge-outline badge-lg example-btn" data-example="Ivy Frank Ocean">Ivy — Frank Ocean</button>
+        <button type="button" class="badge badge-outline badge-lg example-btn" data-example="Blinding Lights The Weeknd">Blinding Lights</button>
+        <button type="button" class="badge badge-outline badge-lg example-btn" data-example="drivers license olivia rodrigo">drivers license</button>
       </div>
     </section>
 
-    <!-- Results -->
-    <section class="result-section hidden" id="resultSection">
-      <div class="input-summary">
-        <span class="input-badge">
-          <span class="input-dot"></span>
-          Input: <span id="inputSummary">—</span>
-        </span>
+    <section class="card bg-base-200 shadow-lg hidden" id="resultSection">
+      <div class="status-row">
+        <span class="status-dot animate-pulse"></span>
+        <span class="text-sm opacity-70">Input: <span id="inputSummary">—</span></span>
       </div>
 
-      <!-- Recommendation card -->
-      <div class="rec-card">
-        <div class="artwork">
-          <img id="recArtwork" src="" alt="Album artwork" />
-        </div>
-        <div class="track-info">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-            <div style="flex: 1;">
-              <h2 class="track-title" id="recTitle">—</h2>
-              <p class="track-artist" id="recArtist">—</p>
-            </div>
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <button onclick="prevRecommendation()" style="background: #2a2a2a; border: 1px solid rgba(255,255,255,0.1); color: #f5f5f5; border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.875rem;">← Prev</button>
-              <span id="recCounter" style="color: #a3a3a3; font-size: 0.75rem; display: none;"></span>
-              <button onclick="nextRecommendation()" style="background: #2a2a2a; border: 1px solid rgba(255,255,255,0.1); color: #f5f5f5; border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.875rem;">Next →</button>
-            </div>
+      <div class="rec-layout">
+        <div class="album-stack">
+          <div class="album-art">
+            <img id="recArtwork" src="" alt="Album artwork" />
           </div>
-          <div class="tags" id="recTags"></div>
-          
-          <div class="similarity">
+          <div class="nav-buttons">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="prevRecommendation()">← Prev</button>
+            <span class="badge badge-primary badge-lg pagination-badge hidden" id="recCounter">1 of 10</span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="nextRecommendation()">Next →</button>
+          </div>
+        </div>
+
+        <div class="track-stack">
+          <div class="title-group">
+            <h2 class="track-title text-3xl font-bold" id="recTitle">—</h2>
+            <p class="track-artist text-xl opacity-80" id="recArtist">—</p>
+          </div>
+
+          <div class="metadata-grid" id="recTags"></div>
+
+          <div class="similarity-card">
             <div class="similarity-header">
-              <span>Similarity</span>
-              <span class="similarity-score" id="similarityScore">—%</span>
+              <span class="similarity-value text-2xl font-bold text-primary" id="similarityScore">—%</span>
+              <span class="section-heading text-lg font-semibold">Similarity match</span>
             </div>
-            <div class="similarity-bar">
-              <div class="similarity-fill" id="similarityFill" style="width: 0%"></div>
+            <div class="progress progress-primary h-2">
+              <div class="progress-bar" id="similarityFill" style="width: 0%;"></div>
             </div>
           </div>
 
-          <div class="controls">
-            <div class="cta-buttons">
-              <a class="cta-btn primary" id="spotifyLink" href="#" target="_blank">
-                Open in Spotify
-              </a>
-              <a class="cta-btn secondary" href="#" target="_blank">
-                Search Apple Music
-              </a>
+          <div class="preview-card">
+            <div class="preview-layout">
+              <button type="button" class="btn btn-success btn-circle btn-lg" id="playBtn">
+                <span class="play-icon">▶</span>
+                <span class="pause-icon" style="display: none;">⏸</span>
+              </button>
+              <div class="preview-info">
+                <div class="section-heading text-lg font-semibold">Preview track</div>
+                <div class="preview-title" id="previewTitle">Click to preview</div>
+                <div class="preview-duration" id="trackDuration">0:30</div>
+              </div>
+              <div class="volume-control">
+                <span class="volume-label">🔉</span>
+                <input type="range" class="range range-xs range-success w-20" id="volumeSlider" min="0" max="100" value="50" />
+              </div>
             </div>
+            <div class="embed-container hidden" id="spotifyEmbed"></div>
+            <div class="preview-description">
+              Listen to a 30-second preview to see if you like this recommendation. Not all tracks have previews available.
+            </div>
+          </div>
+
+          <div class="cta-buttons">
+            <a class="btn btn-primary btn-lg" id="spotifyLink" href="#" target="_blank" rel="noopener">🎧 Open in Spotify</a>
+            <a class="btn btn-outline btn-lg" id="appleMusicLink" href="#" target="_blank" rel="noopener">🍎 Open in Apple Music</a>
           </div>
         </div>
       </div>
 
-      <!-- Explanation -->
-      <div class="play-preview">
-        <div class="play-header">
-          <div class="play-dot"></div>
-          <h3 class="play-title">Preview Track</h3>
-        </div>
-
-        <div class="player-controls" id="playerControls">
-          <button class="play-btn" id="playBtn">
-            <span class="play-icon">Play</span>
-            <span class="pause-icon" style="display: none;">Pause</span>
-          </button>
-          <div class="track-info">
-            <div class="track-preview-title" id="previewTitle">Click to preview</div>
-            <div class="track-duration" id="trackDuration">0:30</div>
-          </div>
-          <div class="volume-control">
-            <span class="volume-icon">Vol</span>
-            <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="50">
-          </div>
-        </div>
-
-        <audio id="audioPlayer" preload="none" crossorigin="anonymous"></audio>
-        <div id="spotifyEmbed" style="margin-top:1rem; display:none;"></div>
-
-        <div class="note">
-          <p>
-            Listen to a 30-second preview to see if you like this recommendation.
-            Not all tracks have previews available.
-          </p>
-        </div>
-      </div>
+      <audio id="audioPlayer" preload="none" crossorigin="anonymous"></audio>
     </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-      <p>One-purpose music discovery. No accounts, no feeds — just one great next song.</p>
-    </footer>
   </main>
+
+  <footer class="footer">
+    <p>One-purpose music discovery. No accounts, no feeds — just one great next song.</p>
+  </footer>
 
   <script>
     const API_BASE = window.location.origin;
@@ -821,17 +896,16 @@
     }
 
     function renderTag(container, tag) {
-      const tagEl = el('span', 'tag');
-      const label = el('span', 'tag-label', `${tag.label}: `);
-      const value = el('span', '', tag.value);
-      tagEl.appendChild(label);
-      tagEl.appendChild(value);
-      container.appendChild(tagEl);
+      const stat = el('div', 'stat-card');
+      const label = el('span', 'stat-label', tag.label);
+      const value = el('span', 'stat-value', tag.value);
+      stat.appendChild(label);
+      stat.appendChild(value);
+      container.appendChild(stat);
     }
 
     // Audio player functionality
     let isPlaying = false;
-    let currentAudio = null;
     let currentRecommendation = null; // Store current recommendation for tracking
 
     // Safe API helper
@@ -864,6 +938,9 @@
     const similarityFill = document.getElementById('similarityFill');
     const audioPlayer = document.getElementById('audioPlayer');
     const spotifyLink = document.getElementById('spotifyLink');
+    const appleMusicLink = document.getElementById('appleMusicLink');
+    const spotifyEmbed = document.getElementById('spotifyEmbed');
+    const recCounter = document.getElementById('recCounter');
     const playBtn = document.getElementById('playBtn');
     const previewTitle = document.getElementById('previewTitle');
     const trackDuration = document.getElementById('trackDuration');
@@ -899,23 +976,21 @@
 
     // Audio player functions
     function showSpotifyEmbed(trackId) {
-      const embed = document.getElementById('spotifyEmbed');
-      embed.innerHTML =
+      spotifyEmbed.innerHTML =
         `<iframe style="border-radius:12px"
           src="https://open.spotify.com/embed/track/${trackId}?utm_source=generator"
           width="100%" height="152" frameborder="0"
           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>`;
-      embed.style.display = 'block';
+      spotifyEmbed.classList.remove('hidden');
     }
 
     function initializeAudioPlayer(previewUrl, trackName, trackId, artistName) {
-      const embed = document.getElementById('spotifyEmbed');
-
       // Store current recommendation
       currentRecommendation = { id: trackId, name: trackName, artist: artistName };
 
       if (previewUrl) {
-        embed.style.display = 'none';
+        spotifyEmbed.classList.add('hidden');
+        spotifyEmbed.innerHTML = '';
         audioPlayer.src = previewUrl;
         audioPlayer.load();
         previewTitle.textContent = `Preview: ${trackName}`;
@@ -931,6 +1006,9 @@
 
         if (trackId && !trackId.startsWith('rec_')) {
           showSpotifyEmbed(trackId);
+        } else {
+          spotifyEmbed.classList.add('hidden');
+          spotifyEmbed.innerHTML = '';
         }
       }
     }
@@ -1287,20 +1365,20 @@
           recommendation.artist
         );
 
-        // Spotify link
         const external = recommendation.external_urls || {};
-        spotifyLink.href =
-          external.spotify ||
+        const query = `${recommendation.name || ''} ${recommendation.artist || ''}`.trim();
+        const encodedQuery = encodeURIComponent(query || recommendation.name || '');
+
+        const spotifyHref = external.spotify || `https://open.spotify.com/search/${encodedQuery}`;
+        spotifyLink.href = spotifyHref;
+        spotifyLink.textContent = external.spotify ? '🎧 Open in Spotify' : '🎧 Search Spotify';
+
+        const appleHref =
           external.appleMusic ||
           external.itunes ||
-          `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
-        if (external.spotify) {
-          spotifyLink.textContent = 'Open in Spotify';
-        } else if (external.appleMusic || external.itunes) {
-          spotifyLink.textContent = 'Open in Apple Music';
-        } else {
-          spotifyLink.textContent = 'Open in Spotify';
-        }
+          `https://music.apple.com/us/search?term=${encodedQuery}`;
+        appleMusicLink.href = appleHref;
+        appleMusicLink.textContent = (external.appleMusic || external.itunes) ? '🍎 Open in Apple Music' : '🍎 Search Apple Music';
 
         // Update recommendation counter
         updateRecCounter();
@@ -1346,20 +1424,20 @@
         recommendation.artist
       );
 
-      // Spotify link
       const external = recommendation.external_urls || {};
-      spotifyLink.href =
-        external.spotify ||
+      const query = `${recommendation.name || ''} ${recommendation.artist || ''}`.trim();
+      const encodedQuery = encodeURIComponent(query || recommendation.name || '');
+
+      const spotifyHref = external.spotify || `https://open.spotify.com/search/${encodedQuery}`;
+      spotifyLink.href = spotifyHref;
+      spotifyLink.textContent = external.spotify ? '🎧 Open in Spotify' : '🎧 Search Spotify';
+
+      const appleHref =
         external.appleMusic ||
         external.itunes ||
-        `https://open.spotify.com/search/${encodeURIComponent(recommendation.name + ' ' + recommendation.artist)}`;
-      if (external.spotify) {
-        spotifyLink.textContent = 'Open in Spotify';
-      } else if (external.appleMusic || external.itunes) {
-        spotifyLink.textContent = 'Open in Apple Music';
-      } else {
-        spotifyLink.textContent = 'Open in Spotify';
-      }
+        `https://music.apple.com/us/search?term=${encodedQuery}`;
+      appleMusicLink.href = appleHref;
+      appleMusicLink.textContent = (external.appleMusic || external.itunes) ? '🍎 Open in Apple Music' : '🍎 Search Apple Music';
 
       updateRecCounter();
     }
@@ -1379,12 +1457,12 @@
     }
 
     function updateRecCounter() {
-      const counter = document.getElementById('recCounter');
-      if (counter && allRecommendations.length > 1) {
-        counter.textContent = `${currentRecIndex + 1} of ${allRecommendations.length}`;
-        counter.style.display = 'block';
-      } else if (counter) {
-        counter.style.display = 'none';
+      if (!recCounter) return;
+      if (allRecommendations.length > 1) {
+        recCounter.textContent = `${currentRecIndex + 1} of ${allRecommendations.length}`;
+        recCounter.classList.remove('hidden');
+      } else {
+        recCounter.classList.add('hidden');
       }
     }
 
