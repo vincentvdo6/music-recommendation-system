@@ -1,229 +1,138 @@
-# Hybrid Recommendation Engine Documentation
+# Contextual Recommendation Engine
 
 ## Overview
 
-This music recommendation system implements a state-of-the-art hybrid approach combining collaborative filtering, content-based methods, and context-aware personalization. The architecture is based on research from industry leaders like Spotify, Pandora, YouTube Music, and SoundCloud.
+The music recommendation system now prioritises contextual awareness over user
+history. Instead of collaborative filtering, it combines a curated knowledge base
+of expertly tagged tracks with on-the-fly interpretation of the listener's
+intent. The engine remains accurate even when there is no listening history,
+making it ideal for fresh users, episodic sessions, or embedded experiences
+where personalised storage is not available.
+
+Key pillars:
+
+- **Curated catalogue** of tracks that include audio features, mood/activity
+  tags, temporal preferences, and geographic relevance.
+- **Context interpreter** that normalises free-form hints (`mood`, `activity`,
+  `time_of_day`, `energy`, `tempo`, `era`, `region`) into canonical targets.
+- **Audio similarity** via Spotify-style feature vectors when a seed track or
+  features are available.
+- **Transparent scoring** with per-track explanations so results can be audited
+  and tuned without guesswork.
 
 ## Architecture
 
-### Three-Pillar Hybrid System
+### 1. Curated Track Catalogue
 
-1. **Collaborative Filtering**
-   - User-user similarity based on listening patterns
-   - Jaccard similarity for finding similar users
-   - Weighted recommendations from users with similar taste
-   - Tracks user interactions: plays, likes, skips
+File: `data/catalogue/tracks.json`
 
-2. **Content-Based Filtering**
-   - Audio feature analysis using Spotify's features:
-     - Valence (mood positivity) - weight 1.2
-     - Energy (intensity) - weight 1.1
-     - Danceability - weight 1.0
-     - Acousticness - weight 0.9
-     - Instrumentalness - weight 0.8
-     - Speechiness - weight 0.7
-     - Tempo - weight 0.6
-     - Loudness - weight 0.4
-   - User taste profile aggregation from listening history
-   - Exponential decay similarity function for natural distribution
+Each entry contains:
 
-3. **Context-Aware Personalization**
-   - Time of day matching (morning/afternoon/evening/night)
-   - Mood-based filtering (upbeat/calm/energetic)
-   - Session pattern recognition
+- Core metadata (`id`, `name`, `artist`, `album`, `uri`)
+- Audio feature vector (valence, energy, danceability, acousticness, tempo,
+  loudness, instrumentalness, speechiness, liveness)
+- Popularity and release year for freshness weighting
+- Semantic tags grouped into `genres`, `moods`, `activities`, `time_of_day`,
+  and `regions`
 
-### Two-Stage Ranking
+The loader (`TrackCatalogue`) provides fast lookups by ID or by fuzzy matching
+on name/artist and exposes an iterable collection for scoring.
 
-#### Stage 1: Candidate Generation (Fast, Broad)
-- Collaborative filtering recommendations (from similar users)
-- Content-based recommendations (from Spotify's algorithm)
-- Popular tracks (fallback)
-- Targets ~100 candidates for efficiency
+### 2. Context Interpreter
 
-#### Stage 2: Hybrid Scoring & Re-ranking (Precise, Detailed)
-- Collaborative score (40% weight)
-- Content similarity score (40% weight)
-- Popularity score (10% weight)
-- Context match score (10% weight)
-- Diversity injection to prevent filter bubble
+Module: `services/recommendation/contextual_engine.py`
+
+- Normalises loose user input (e.g. "late night", "gym", "rnb") into canonical
+  categories.
+- Maps context to target audio profiles using handcrafted heuristics (e.g.
+  `workout` → high energy, `focus` → lower energy + higher instrumentalness).
+- Supports tempo buckets, era presets (`current`, `2010s`, `classic`, etc.), and
+  regional hints.
+
+### 3. Audio Similarity Layer
+
+The existing `AudioSimilarityEngine` is reused to compute weighted similarity
+between the target profile and catalogue entries. If no seed audio data is
+available the engine falls back to context-only profiles and uses a neutral
+baseline to keep scores meaningful.
+
+### 4. Scoring & Diversity
+
+For each candidate track the engine computes the following components:
+
+| Component   | Description                                                     | Default Weight |
+|-------------|-----------------------------------------------------------------|----------------|
+| similarity  | Audio feature distance to the inferred target profile           | 0.45           |
+| context     | Alignment between catalogue tags and contextual hints           | 0.35           |
+| popularity  | Normalised popularity (guard rails against overly obscure picks)| 0.15           |
+| freshness   | Release year alignment with requested era / recency preference | 0.05           |
+| penalty     | Diversity nudges (e.g. small penalty for repeating the seed artist) | applied directly |
+
+After scoring the engine enforces diversity by limiting each artist to a maximum
+of two appearances in the final list while preserving order. If all candidates
+are filtered out (e.g. empty catalogue) the engine returns trending tracks
+sorted by popularity.
+
+### 5. Explanations
+
+Every recommended track carries an embedded explanation:
+
+```json
+{
+  "id": "catalog:track:midnight_drive",
+  "name": "Midnight Drive",
+  "artist": "Neon Skyline",
+  "recommendation": {
+    "score": 0.8125,
+    "components": {
+      "similarity": 0.86,
+      "context": 0.79,
+      "popularity": 0.82,
+      "freshness": 0.58
+    }
+  }
+}
+```
+
+This makes it straightforward to tune the catalogue, adjust weights, or explain
+results to end-users.
 
 ## API Usage
 
-### Get Personalized Recommendations
-
 ```bash
-GET /api/v1/recommendations?seed=spotify:track:abc123&user_id=user_xyz&limit=10&time_of_day=evening&mood=calm
+GET /api/v1/recommendations?seed=spotify:track:1AbCxyz&limit=8&mood=upbeat&activity=workout&time_of_day=evening
 ```
 
-**Parameters:**
-- `seed` (required): Track URI or ID to base recommendations on
-- `user_id` (optional): User ID for personalized recommendations
-- `limit` (optional): Number of recommendations (1-20, default 5)
-- `track_name` (optional): Seed track name for non-Spotify IDs
-- `artist_name` (optional): Seed artist name
-- `time_of_day` (optional): Context - morning/afternoon/evening/night
-- `mood` (optional): Context - upbeat/calm/energetic
+- `seed` *(optional)*: Spotify/Apple/catalog identifier. Used for audio
+  similarity if features are available. Leave empty for pure context-based
+  picks.
+- `mood`, `activity`, `time_of_day`, `energy`, `tempo`, `era`, `genres`,
+  `regions`: contextual hints. Singular or plural forms are supported.
+- `user_id`: retained for compatibility but no longer affects scoring.
 
-**Response:**
-```json
-{
-  "seed": "spotify:track:abc123",
-  "total": 10,
-  "algorithm": "Hybrid (Collaborative + Content-Based + Context-Aware)",
-  "source": "hybrid",
-  "recommendations": [
-    {
-      "id": "track_id",
-      "name": "Song Name",
-      "artist": "Artist Name",
-      "similarity_score": 0.92,
-      "audio_features": {...},
-      "explanation": {
-        "top_factors": ["High energy", "Upbeat mood"],
-        "similarity_reason": "Based on audio features and listening patterns"
-      }
-    }
-  ]
-}
-```
+Response shape mirrors previous versions but `source` will now read
+`"contextual"` when the curated engine is used.
 
-### Track User Interactions
+## Extending the Catalogue
 
-To improve personalization, track user interactions:
+1. Add or edit entries in `data/catalogue/tracks.json`.
+2. Maintain consistent audio feature scaling (`tempo` in BPM, `loudness` in dB).
+3. Add descriptive tags to improve context matching; the engine performs
+   case-insensitive matching and supports light fuzzy comparisons.
+4. Reload the service — no additional preprocessing is required.
 
-```bash
-POST /api/v1/track-interaction?user_id=user_xyz&track_id=abc123&interaction=play&track_name=Song&artist_name=Artist
-```
+## Cold Start & Offline Behaviour
 
-**Interaction Types:**
-- `play`: User listened to the track
-- `like`: User explicitly liked the track
-- `skip`: User skipped the track
+- No user profile storage is required; the engine works immediately after start-up.
+- If external APIs are unavailable the system still serves recommendations from
+  the local catalogue.
+- When both seed and context are missing the engine returns the most popular
+  curated tracks, ensuring deterministic behaviour for smoke tests and demos.
 
-## How It Works
+## Future Tweaks
 
-### User Profile Building
+- Integrate live charts or editorial playlists to auto-refresh catalogue data.
+- Add optional machine-learned models to refine context → feature translation.
+- Capture lightweight session feedback (without persistent profiles) to adapt
+  weighting during a single listening session.
 
-1. **Listening History**: Stores last 500 plays per user
-2. **Taste Profile**: Aggregates audio features from recent plays (last 50 tracks)
-3. **Preference Learning**: Learns patterns like:
-   - Preferred artists
-   - Typical listening times
-   - Energy/mood preferences
-   - Skip patterns
-
-### Similarity Calculation
-
-**Audio Feature Similarity:**
-```python
-# Weighted Euclidean distance with exponential decay
-distance = sqrt(sum((feature1 - feature2)^2 * weight) / total_weight)
-similarity = exp(-2.0 * distance)
-```
-
-**User Similarity (Collaborative Filtering):**
-```python
-# Jaccard similarity between user listening sets
-intersection = len(user1_tracks & user2_tracks)
-union = len(user1_tracks | user2_tracks)
-similarity = intersection / union
-```
-
-### Hybrid Score Formula
-
-```python
-final_score = (
-    collaborative_score * 0.4 +
-    content_score * 0.4 +
-    popularity_score * 0.1 +
-    context_score * 0.1
-)
-```
-
-### Diversity Mechanism
-
-To prevent filter bubbles, the system:
-- Takes top-scoring candidate
-- Alternates between:
-  - 70% probability: next highest-scoring track
-  - 30% probability: diverse pick from middle range
-- Ensures variety while maintaining relevance
-
-## Cold Start Handling
-
-### New Users
-- Default to popular tracks
-- Use audio features once first track is played
-- Build collaborative profile after 2+ tracks in common with other users
-
-### New Tracks
-- Use audio features for content-based matching
-- Leverage Spotify's recommendation API
-- Track initial plays to build collaborative signal
-
-## Performance Optimizations
-
-1. **Caching**
-   - Spotify search cache: 2000 entries, 5min TTL
-   - Audio features cache: 10000 entries, 2hrs TTL
-   - Batch audio feature fetching (up to 100 tracks at once)
-
-2. **Persistence**
-   - User profiles saved to disk on shutdown
-   - Automatic loading on startup
-   - JSON format for easy inspection
-
-3. **Two-Stage Architecture**
-   - Stage 1 generates ~100 candidates quickly
-   - Stage 2 only scores/ranks those 100
-   - Prevents expensive computation on full catalog
-
-## Data Storage
-
-User data is stored in `data/user_profiles/profiles.json`:
-```json
-{
-  "user_plays": {
-    "user_id": [
-      {
-        "track_id": "abc123",
-        "track_name": "Song",
-        "artist": "Artist",
-        "timestamp": "2025-01-15T10:30:00",
-        "provider": "spotify"
-      }
-    ]
-  },
-  "user_likes": {"user_id": ["track_id1", "track_id2"]},
-  "user_skips": {"user_id": ["track_id3"]},
-  "track_plays": {"track_id": 42},
-  "track_users": {"track_id": ["user1", "user2"]}
-}
-```
-
-## Research Foundation
-
-This implementation is based on techniques from:
-
-- **Spotify**: Audio feature analysis, hybrid collaborative + content filtering, ANN search
-- **Pandora**: Music Genome Project approach, detailed audio attributes
-- **YouTube Music**: Transformer-based sequential modeling, context awareness
-- **SoundCloud**: Cold start solutions using audio AI analysis
-
-Key papers and resources:
-- Collaborative filtering with matrix factorization
-- CNN-based audio feature extraction
-- RNN/Transformer sequential recommendation
-- Hybrid recommender systems
-- ANN search for real-time retrieval (Annoy, HNSW)
-
-## Future Enhancements
-
-Potential improvements:
-1. **ANN Search**: Implement HNSW for faster similarity lookups at scale
-2. **Deep Learning**: Train custom audio embedding models
-3. **Graph-Based CF**: Use graph neural networks for user-item interactions
-4. **Bandit Algorithms**: Balance exploration vs exploitation
-5. **Session-Based**: RNN/Transformer for sequence modeling
-6. **Explicit Feedback**: Incorporate user ratings
-7. **Multi-Armed Bandits**: A/B testing for algorithm improvements

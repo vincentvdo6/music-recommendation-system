@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Simple startup script for the music recommendation system."""
 
+import os
 import subprocess
 import sys
 import webbrowser
@@ -37,13 +38,20 @@ def main():
     
     try:
         # Start uvicorn server
-        subprocess.run([
-            sys.executable, "-m", "uvicorn", 
-            "api.main:app", 
-            "--host", "0.0.0.0", 
-            "--port", "8000", 
-            "--reload"
-        ])
+        cmd = [
+            sys.executable, "-m", "uvicorn",
+            "api.main:app",
+            "--host", "0.0.0.0",
+            "--port", "8000",
+            "--reload",
+            "--no-access-log",
+        ]
+
+        log_level = os.getenv("UVICORN_LOG_LEVEL")
+        if log_level:
+            cmd.extend(["--log-level", log_level.lower()])
+
+        subprocess.run(cmd, check=False)
     except KeyboardInterrupt:
         print("\nServer stopped")
 

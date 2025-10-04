@@ -4,6 +4,7 @@ import os
 import time
 import uuid
 import logging
+import logging.config
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -22,8 +23,44 @@ from services.spotify.client import SpotifyClient
 from services.music.service import MusicService
 from api.models import HealthResponse
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with a clean, compact format
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+LOG_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            "datefmt": "%H:%M:%S",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "default",
+        }
+    },
+    "root": {
+        "level": LOG_LEVEL,
+        "handlers": ["console"],
+    },
+}
+
+logging.config.dictConfig(LOG_CONFIG)
+
+NOISY_LOGGERS = {
+    "uvicorn": logging.WARNING,
+    "uvicorn.error": logging.WARNING,
+    "uvicorn.access": logging.WARNING,
+    "uvicorn.asgi": logging.WARNING,
+    "watchfiles": logging.WARNING,
+    "httpx": logging.WARNING,
+}
+
+for name, level in NOISY_LOGGERS.items():
+    logging.getLogger(name).setLevel(level)
+
 logger = logging.getLogger("music-rec")
 
 # Load environment variables

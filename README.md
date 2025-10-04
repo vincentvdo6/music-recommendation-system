@@ -1,15 +1,17 @@
 # 🎵 Music Recommendation System
 
-A simple music recommendation web application powered by Spotify's database and audio features.
+A contextual music discovery web app that blends curated knowledge with optional
+Spotify data. The recommendation engine no longer depends on user history—it
+works instantly using mood, activity, and other situational hints.
 
 ## ✨ Features
 
-- 🔍 **Song Search**: Search for any song or artist from Spotify's catalog
-- 🎯 **Smart Recommendations**: Get personalized recommendations based on audio features
+- 🔍 **Song Search**: Optional Spotify search when credentials are configured
+- 🧭 **Context-Aware Engine**: Accurate results from curated catalogue + mood/activity cues
 - 🎨 **Beautiful Interface**: Modern, responsive web design
-- 🎧 **Real Data**: Uses actual Spotify tracks, not mock data
-- 📊 **Audio Analysis**: Shows tempo, energy, danceability, and mood
-- 🎯 **Smart Analysis**: Understand why each song was recommended
+- 📊 **Audio Insights**: View tempo, energy, danceability, and mood metadata
+- 🧠 **Transparent Scoring**: Every recommendation exposes its score breakdown
+- 📴 **Offline Ready**: Works with the built-in catalogue even without Spotify access
 
 ## 🚀 Quick Start
 
@@ -37,17 +39,25 @@ The server will start automatically and open your browser to http://localhost:80
 ```
 Music_Recommendation/
 ├── api/
-│   ├── main.py              # FastAPI application
+│   ├── main.py                  # FastAPI application entrypoint
 │   └── routers/
-│       └── search.py        # Search and recommendations API
+│       └── search.py            # Search and recommendation endpoints
 ├── services/
+│   ├── music/
+│   │   └── service.py           # Orchestrates providers + contextual engine
+│   ├── recommendation/
+│   │   ├── audio_similarity.py  # Feature-based similarity utilities
+│   │   ├── catalogue.py         # Curated track catalogue loader
+│   │   └── contextual_engine.py # Context-first recommendation engine
 │   └── spotify/
-│       └── client.py        # Spotify Web API client
+│       └── client.py            # Spotify Web API client (optional)
+├── data/
+│   └── catalogue/tracks.json    # Built-in recommendation knowledge base
 ├── static/
-│   └── index.html          # Web interface
-├── requirements.txt        # Python dependencies
-├── start.bat              # Windows startup script
-└── run_local.py           # Python startup script
+│   └── index.html               # Web interface
+├── requirements.txt             # Python dependencies
+├── start.bat                    # Windows startup script
+└── run_local.py                 # Python startup script
 ```
 
 ## 🛠️ Requirements
@@ -57,11 +67,11 @@ Music_Recommendation/
 
 ## 🎯 What Makes It Special
 
-- **Real Music Data**: Uses Spotify's actual database of songs
-- **Audio Features**: Analyzes tempo, energy, key, mood, and danceability  
-- **Smart Matching**: Finds similar songs based on musical characteristics
-- **Clean & Simple**: Minimal codebase, easy to understand and modify
-- **Flexible Setup**: Works with fallback data when no Spotify credentials are available
+- **Context-first**: Accurate recommendations from the first request—no history required
+- **Curated Knowledge**: Tunable dataset with rich tags for explainable results
+- **Audio Features**: Uses Spotify-style feature vectors for musical similarity
+- **Transparent**: Recommendation payloads include score components for debugging
+- **Flexible Setup**: Runs fully offline using the catalogue and upgrades seamlessly with Spotify
 
 ## 🔧 Configuration (secure)
 

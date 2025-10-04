@@ -1,0 +1,947 @@
+[
+  {
+    "id": "catalog:track:midnight_drive",
+    "uri": "catalog:track:midnight_drive",
+    "provider": "catalog",
+    "name": "Midnight Drive",
+    "artist": "Neon Skyline",
+    "album": "After Hours",
+    "duration_ms": 238000,
+    "popularity": 82,
+    "release_year": 2021,
+    "preview_url": "https://example.com/audio/midnight_drive.mp3",
+    "image_url": "https://example.com/images/midnight_drive.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.72,
+      "energy": 0.74,
+      "danceability": 0.81,
+      "acousticness": 0.04,
+      "instrumentalness": 0.0,
+      "speechiness": 0.12,
+      "liveness": 0.11,
+      "tempo": 118.0,
+      "loudness": -5.4
+    },
+    "tags": {
+      "genres": ["synthpop", "electropop"],
+      "moods": ["upbeat", "dreamy"],
+      "activities": ["driving", "party"],
+      "time_of_day": ["evening", "night"],
+      "regions": ["global", "europe"]
+    }
+  },
+  {
+    "id": "catalog:track:sunrise_slow",
+    "uri": "catalog:track:sunrise_slow",
+    "provider": "catalog",
+    "name": "Sunrise Slow",
+    "artist": "Harbor Lights",
+    "album": "First Light",
+    "duration_ms": 262000,
+    "popularity": 74,
+    "release_year": 2019,
+    "preview_url": "https://example.com/audio/sunrise_slow.mp3",
+    "image_url": "https://example.com/images/sunrise_slow.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.56,
+      "energy": 0.41,
+      "danceability": 0.47,
+      "acousticness": 0.63,
+      "instrumentalness": 0.02,
+      "speechiness": 0.04,
+      "liveness": 0.12,
+      "tempo": 92.0,
+      "loudness": -8.6
+    },
+    "tags": {
+      "genres": ["indie", "folk"],
+      "moods": ["chill", "hopeful"],
+      "activities": ["morning", "focus"],
+      "time_of_day": ["morning", "afternoon"],
+      "regions": ["north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:cosmic_wave",
+    "uri": "catalog:track:cosmic_wave",
+    "provider": "catalog",
+    "name": "Cosmic Wave",
+    "artist": "Parallel Lines",
+    "album": "Orbit",
+    "duration_ms": 276000,
+    "popularity": 65,
+    "release_year": 2017,
+    "preview_url": "https://example.com/audio/cosmic_wave.mp3",
+    "image_url": "https://example.com/images/cosmic_wave.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.48,
+      "energy": 0.62,
+      "danceability": 0.59,
+      "acousticness": 0.18,
+      "instrumentalness": 0.04,
+      "speechiness": 0.06,
+      "liveness": 0.08,
+      "tempo": 124.0,
+      "loudness": -6.2
+    },
+    "tags": {
+      "genres": ["electronic", "indietronica"],
+      "moods": ["dreamy", "uplifting"],
+      "activities": ["focus", "coding"],
+      "time_of_day": ["afternoon", "evening"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:cityscape",
+    "uri": "catalog:track:cityscape",
+    "provider": "catalog",
+    "name": "Cityscape",
+    "artist": "Blueprint",
+    "album": "Urban Stories",
+    "duration_ms": 198000,
+    "popularity": 79,
+    "release_year": 2020,
+    "preview_url": "https://example.com/audio/cityscape.mp3",
+    "image_url": "https://example.com/images/cityscape.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.61,
+      "energy": 0.83,
+      "danceability": 0.88,
+      "acousticness": 0.09,
+      "instrumentalness": 0.0,
+      "speechiness": 0.18,
+      "liveness": 0.19,
+      "tempo": 126.0,
+      "loudness": -4.8
+    },
+    "tags": {
+      "genres": ["hip-hop", "neo-soul"],
+      "moods": ["confident", "upbeat"],
+      "activities": ["commute", "party"],
+      "time_of_day": ["afternoon", "evening"],
+      "regions": ["global", "north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:still_water",
+    "uri": "catalog:track:still_water",
+    "provider": "catalog",
+    "name": "Still Water",
+    "artist": "Eira",
+    "album": "Glacier",
+    "duration_ms": 312000,
+    "popularity": 48,
+    "release_year": 2016,
+    "preview_url": "https://example.com/audio/still_water.mp3",
+    "image_url": "https://example.com/images/still_water.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.22,
+      "energy": 0.19,
+      "danceability": 0.18,
+      "acousticness": 0.91,
+      "instrumentalness": 0.78,
+      "speechiness": 0.03,
+      "liveness": 0.09,
+      "tempo": 64.0,
+      "loudness": -18.2
+    },
+    "tags": {
+      "genres": ["ambient", "modern classical"],
+      "moods": ["calm", "meditative"],
+      "activities": ["sleep", "yoga"],
+      "time_of_day": ["night"],
+      "regions": ["nordic"]
+    }
+  },
+  {
+    "id": "catalog:track:golden_hour",
+    "uri": "catalog:track:golden_hour",
+    "provider": "catalog",
+    "name": "Golden Hour",
+    "artist": "Lucia Vega",
+    "album": "Sunset Mirage",
+    "duration_ms": 223000,
+    "popularity": 91,
+    "release_year": 2022,
+    "preview_url": "https://example.com/audio/golden_hour.mp3",
+    "image_url": "https://example.com/images/golden_hour.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.84,
+      "energy": 0.69,
+      "danceability": 0.77,
+      "acousticness": 0.17,
+      "instrumentalness": 0.0,
+      "speechiness": 0.07,
+      "liveness": 0.1,
+      "tempo": 120.0,
+      "loudness": -5.2
+    },
+    "tags": {
+      "genres": ["pop", "tropical"],
+      "moods": ["uplifting", "romantic"],
+      "activities": ["brunch", "roadtrip"],
+      "time_of_day": ["afternoon", "evening"],
+      "regions": ["latin", "global"]
+    }
+  },
+  {
+    "id": "catalog:track:northern_lights",
+    "uri": "catalog:track:northern_lights",
+    "provider": "catalog",
+    "name": "Northern Lights",
+    "artist": "Polar Haze",
+    "album": "Sky Trails",
+    "duration_ms": 254000,
+    "popularity": 60,
+    "release_year": 2015,
+    "preview_url": "https://example.com/audio/northern_lights.mp3",
+    "image_url": "https://example.com/images/northern_lights.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.35,
+      "energy": 0.45,
+      "danceability": 0.41,
+      "acousticness": 0.38,
+      "instrumentalness": 0.26,
+      "speechiness": 0.04,
+      "liveness": 0.15,
+      "tempo": 88.0,
+      "loudness": -10.1
+    },
+    "tags": {
+      "genres": ["post-rock", "ambient"],
+      "moods": ["nostalgic", "calm"],
+      "activities": ["study", "focus"],
+      "time_of_day": ["night", "evening"],
+      "regions": ["europe"]
+    }
+  },
+  {
+    "id": "catalog:track:heatwave",
+    "uri": "catalog:track:heatwave",
+    "provider": "catalog",
+    "name": "Heatwave",
+    "artist": "Nova Pulse",
+    "album": "Super Bloom",
+    "duration_ms": 203000,
+    "popularity": 88,
+    "release_year": 2023,
+    "preview_url": "https://example.com/audio/heatwave.mp3",
+    "image_url": "https://example.com/images/heatwave.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.79,
+      "energy": 0.92,
+      "danceability": 0.86,
+      "acousticness": 0.05,
+      "instrumentalness": 0.0,
+      "speechiness": 0.09,
+      "liveness": 0.13,
+      "tempo": 128.0,
+      "loudness": -3.9
+    },
+    "tags": {
+      "genres": ["dance", "house"],
+      "moods": ["energetic", "upbeat"],
+      "activities": ["workout", "party"],
+      "time_of_day": ["evening", "night"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:desert_dreams",
+    "uri": "catalog:track:desert_dreams",
+    "provider": "catalog",
+    "name": "Desert Dreams",
+    "artist": "Sahara Echo",
+    "album": "Mirage",
+    "duration_ms": 285000,
+    "popularity": 58,
+    "release_year": 2014,
+    "preview_url": "https://example.com/audio/desert_dreams.mp3",
+    "image_url": "https://example.com/images/desert_dreams.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.41,
+      "energy": 0.54,
+      "danceability": 0.52,
+      "acousticness": 0.48,
+      "instrumentalness": 0.12,
+      "speechiness": 0.05,
+      "liveness": 0.16,
+      "tempo": 100.0,
+      "loudness": -9.3
+    },
+    "tags": {
+      "genres": ["world", "indie"],
+      "moods": ["mysterious", "dreamy"],
+      "activities": ["travel", "focus"],
+      "time_of_day": ["evening"],
+      "regions": ["middle_east", "europe"]
+    }
+  },
+  {
+    "id": "catalog:track:neon_valley",
+    "uri": "catalog:track:neon_valley",
+    "provider": "catalog",
+    "name": "Neon Valley",
+    "artist": "Analog Youth",
+    "album": "Digital Sunsets",
+    "duration_ms": 231000,
+    "popularity": 71,
+    "release_year": 2018,
+    "preview_url": "https://example.com/audio/neon_valley.mp3",
+    "image_url": "https://example.com/images/neon_valley.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.67,
+      "energy": 0.71,
+      "danceability": 0.74,
+      "acousticness": 0.08,
+      "instrumentalness": 0.06,
+      "speechiness": 0.06,
+      "liveness": 0.09,
+      "tempo": 115.0,
+      "loudness": -6.0
+    },
+    "tags": {
+      "genres": ["synthwave", "electronic"],
+      "moods": ["nostalgic", "upbeat"],
+      "activities": ["driving", "coding"],
+      "time_of_day": ["night", "evening"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:echoes_of_you",
+    "uri": "catalog:track:echoes_of_you",
+    "provider": "catalog",
+    "name": "Echoes of You",
+    "artist": "Marina Sol",
+    "album": "Ocean Lines",
+    "duration_ms": 247000,
+    "popularity": 69,
+    "release_year": 2021,
+    "preview_url": "https://example.com/audio/echoes_of_you.mp3",
+    "image_url": "https://example.com/images/echoes_of_you.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.58,
+      "energy": 0.52,
+      "danceability": 0.63,
+      "acousticness": 0.35,
+      "instrumentalness": 0.02,
+      "speechiness": 0.04,
+      "liveness": 0.17,
+      "tempo": 104.0,
+      "loudness": -7.5
+    },
+    "tags": {
+      "genres": ["indie", "dream pop"],
+      "moods": ["romantic", "calm"],
+      "activities": ["relax", "evening"],
+      "time_of_day": ["evening", "night"],
+      "regions": ["latin", "global"]
+    }
+  },
+  {
+    "id": "catalog:track:signal_fire",
+    "uri": "catalog:track:signal_fire",
+    "provider": "catalog",
+    "name": "Signal Fire",
+    "artist": "Atlas Beacon",
+    "album": "Arc Light",
+    "duration_ms": 216000,
+    "popularity": 77,
+    "release_year": 2018,
+    "preview_url": "https://example.com/audio/signal_fire.mp3",
+    "image_url": "https://example.com/images/signal_fire.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.51,
+      "energy": 0.86,
+      "danceability": 0.52,
+      "acousticness": 0.14,
+      "instrumentalness": 0.0,
+      "speechiness": 0.05,
+      "liveness": 0.21,
+      "tempo": 140.0,
+      "loudness": -4.2
+    },
+    "tags": {
+      "genres": ["alternative", "rock"],
+      "moods": ["urgent", "energetic"],
+      "activities": ["running", "motivation"],
+      "time_of_day": ["afternoon", "evening"],
+      "regions": ["global", "oceania"]
+    }
+  },
+  {
+    "id": "catalog:track:low_key",
+    "uri": "catalog:track:low_key",
+    "provider": "catalog",
+    "name": "Low Key",
+    "artist": "Riverstone",
+    "album": "Soft Focus",
+    "duration_ms": 209000,
+    "popularity": 54,
+    "release_year": 2016,
+    "preview_url": "https://example.com/audio/low_key.mp3",
+    "image_url": "https://example.com/images/low_key.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.44,
+      "energy": 0.34,
+      "danceability": 0.62,
+      "acousticness": 0.58,
+      "instrumentalness": 0.0,
+      "speechiness": 0.05,
+      "liveness": 0.12,
+      "tempo": 82.0,
+      "loudness": -11.2
+    },
+    "tags": {
+      "genres": ["lofi", "chillhop"],
+      "moods": ["chill", "pensive"],
+      "activities": ["study", "coding"],
+      "time_of_day": ["night", "late"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:afterglow",
+    "uri": "catalog:track:afterglow",
+    "provider": "catalog",
+    "name": "Afterglow",
+    "artist": "Violet Echo",
+    "album": "Chromatic",
+    "duration_ms": 234000,
+    "popularity": 83,
+    "release_year": 2020,
+    "preview_url": "https://example.com/audio/afterglow.mp3",
+    "image_url": "https://example.com/images/afterglow.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.75,
+      "energy": 0.67,
+      "danceability": 0.72,
+      "acousticness": 0.21,
+      "instrumentalness": 0.0,
+      "speechiness": 0.06,
+      "liveness": 0.09,
+      "tempo": 112.0,
+      "loudness": -6.5
+    },
+    "tags": {
+      "genres": ["pop", "synthpop"],
+      "moods": ["uplifting", "romantic"],
+      "activities": ["commute", "afternoon"],
+      "time_of_day": ["afternoon", "evening"],
+      "regions": ["global", "asia"]
+    }
+  },
+  {
+    "id": "catalog:track:cerulean",
+    "uri": "catalog:track:cerulean",
+    "provider": "catalog",
+    "name": "Cerulean",
+    "artist": "Azure Fields",
+    "album": "Drift",
+    "duration_ms": 267000,
+    "popularity": 50,
+    "release_year": 2013,
+    "preview_url": "https://example.com/audio/cerulean.mp3",
+    "image_url": "https://example.com/images/cerulean.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.33,
+      "energy": 0.28,
+      "danceability": 0.38,
+      "acousticness": 0.76,
+      "instrumentalness": 0.32,
+      "speechiness": 0.03,
+      "liveness": 0.13,
+      "tempo": 74.0,
+      "loudness": -14.8
+    },
+    "tags": {
+      "genres": ["ambient", "acoustic"],
+      "moods": ["calm", "melancholic"],
+      "activities": ["sleep", "reading"],
+      "time_of_day": ["night", "late"],
+      "regions": ["north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:sky_runner",
+    "uri": "catalog:track:sky_runner",
+    "provider": "catalog",
+    "name": "Sky Runner",
+    "artist": "Velocity",
+    "album": "Helios",
+    "duration_ms": 198000,
+    "popularity": 86,
+    "release_year": 2022,
+    "preview_url": "https://example.com/audio/sky_runner.mp3",
+    "image_url": "https://example.com/images/sky_runner.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.68,
+      "energy": 0.95,
+      "danceability": 0.65,
+      "acousticness": 0.03,
+      "instrumentalness": 0.32,
+      "speechiness": 0.04,
+      "liveness": 0.18,
+      "tempo": 170.0,
+      "loudness": -4.0
+    },
+    "tags": {
+      "genres": ["drum_and_bass", "electronic"],
+      "moods": ["energetic", "intense"],
+      "activities": ["workout", "running"],
+      "time_of_day": ["morning", "afternoon"],
+      "regions": ["uk", "global"]
+    }
+  },
+  {
+    "id": "catalog:track:violet_haze",
+    "uri": "catalog:track:violet_haze",
+    "provider": "catalog",
+    "name": "Violet Haze",
+    "artist": "Opal Bloom",
+    "album": "Pastel Skies",
+    "duration_ms": 244000,
+    "popularity": 63,
+    "release_year": 2019,
+    "preview_url": "https://example.com/audio/violet_haze.mp3",
+    "image_url": "https://example.com/images/violet_haze.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.47,
+      "energy": 0.58,
+      "danceability": 0.66,
+      "acousticness": 0.27,
+      "instrumentalness": 0.0,
+      "speechiness": 0.05,
+      "liveness": 0.1,
+      "tempo": 108.0,
+      "loudness": -7.8
+    },
+    "tags": {
+      "genres": ["r&b", "neo-soul"],
+      "moods": ["sensual", "smooth"],
+      "activities": ["evening", "relax"],
+      "time_of_day": ["night", "evening"],
+      "regions": ["global", "north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:ember_glow",
+    "uri": "catalog:track:ember_glow",
+    "provider": "catalog",
+    "name": "Ember Glow",
+    "artist": "Wild Pines",
+    "album": "Frontier",
+    "duration_ms": 256000,
+    "popularity": 72,
+    "release_year": 2017,
+    "preview_url": "https://example.com/audio/ember_glow.mp3",
+    "image_url": "https://example.com/images/ember_glow.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.52,
+      "energy": 0.64,
+      "danceability": 0.55,
+      "acousticness": 0.36,
+      "instrumentalness": 0.0,
+      "speechiness": 0.05,
+      "liveness": 0.14,
+      "tempo": 96.0,
+      "loudness": -8.5
+    },
+    "tags": {
+      "genres": ["folk", "americana"],
+      "moods": ["warm", "hopeful"],
+      "activities": ["campfire", "relax"],
+      "time_of_day": ["evening"],
+      "regions": ["north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:tidal_shift",
+    "uri": "catalog:track:tidal_shift",
+    "provider": "catalog",
+    "name": "Tidal Shift",
+    "artist": "Flux Harbour",
+    "album": "Currents",
+    "duration_ms": 289000,
+    "popularity": 67,
+    "release_year": 2015,
+    "preview_url": "https://example.com/audio/tidal_shift.mp3",
+    "image_url": "https://example.com/images/tidal_shift.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.39,
+      "energy": 0.48,
+      "danceability": 0.45,
+      "acousticness": 0.29,
+      "instrumentalness": 0.14,
+      "speechiness": 0.04,
+      "liveness": 0.12,
+      "tempo": 110.0,
+      "loudness": -9.0
+    },
+    "tags": {
+      "genres": ["indie", "post-rock"],
+      "moods": ["melancholic", "cinematic"],
+      "activities": ["focus", "reading"],
+      "time_of_day": ["late", "evening"],
+      "regions": ["europe"]
+    }
+  },
+  {
+    "id": "catalog:track:ember_city",
+    "uri": "catalog:track:ember_city",
+    "provider": "catalog",
+    "name": "Ember City",
+    "artist": "Luminous",
+    "album": "Skybound",
+    "duration_ms": 210000,
+    "popularity": 80,
+    "release_year": 2021,
+    "preview_url": "https://example.com/audio/ember_city.mp3",
+    "image_url": "https://example.com/images/ember_city.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.69,
+      "energy": 0.88,
+      "danceability": 0.79,
+      "acousticness": 0.09,
+      "instrumentalness": 0.01,
+      "speechiness": 0.07,
+      "liveness": 0.11,
+      "tempo": 122.0,
+      "loudness": -4.7
+    },
+    "tags": {
+      "genres": ["k-pop", "dance"],
+      "moods": ["upbeat", "energetic"],
+      "activities": ["dance", "party"],
+      "time_of_day": ["afternoon", "evening"],
+      "regions": ["asia", "global"]
+    }
+  },
+  {
+    "id": "catalog:track:crimson_mist",
+    "uri": "catalog:track:crimson_mist",
+    "provider": "catalog",
+    "name": "Crimson Mist",
+    "artist": "Duskwalkers",
+    "album": "Low Tide",
+    "duration_ms": 260000,
+    "popularity": 55,
+    "release_year": 2012,
+    "preview_url": "https://example.com/audio/crimson_mist.mp3",
+    "image_url": "https://example.com/images/crimson_mist.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.28,
+      "energy": 0.51,
+      "danceability": 0.43,
+      "acousticness": 0.42,
+      "instrumentalness": 0.0,
+      "speechiness": 0.04,
+      "liveness": 0.13,
+      "tempo": 130.0,
+      "loudness": -8.9
+    },
+    "tags": {
+      "genres": ["indie", "dark pop"],
+      "moods": ["moody", "introspective"],
+      "activities": ["night_drive", "focus"],
+      "time_of_day": ["night"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:bright_mornings",
+    "uri": "catalog:track:bright_mornings",
+    "provider": "catalog",
+    "name": "Bright Mornings",
+    "artist": "Paper Cranes",
+    "album": "Daylight",
+    "duration_ms": 225000,
+    "popularity": 62,
+    "release_year": 2016,
+    "preview_url": "https://example.com/audio/bright_mornings.mp3",
+    "image_url": "https://example.com/images/bright_mornings.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.71,
+      "energy": 0.55,
+      "danceability": 0.66,
+      "acousticness": 0.41,
+      "instrumentalness": 0.0,
+      "speechiness": 0.05,
+      "liveness": 0.11,
+      "tempo": 102.0,
+      "loudness": -7.7
+    },
+    "tags": {
+      "genres": ["indie", "folk"],
+      "moods": ["uplifting", "hopeful"],
+      "activities": ["morning", "study"],
+      "time_of_day": ["morning"],
+      "regions": ["europe", "north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:moonset",
+    "uri": "catalog:track:moonset",
+    "provider": "catalog",
+    "name": "Moonset",
+    "artist": "Lunar Waves",
+    "album": "Tides",
+    "duration_ms": 312000,
+    "popularity": 52,
+    "release_year": 2014,
+    "preview_url": "https://example.com/audio/moonset.mp3",
+    "image_url": "https://example.com/images/moonset.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.3,
+      "energy": 0.37,
+      "danceability": 0.34,
+      "acousticness": 0.69,
+      "instrumentalness": 0.19,
+      "speechiness": 0.03,
+      "liveness": 0.1,
+      "tempo": 78.0,
+      "loudness": -12.4
+    },
+    "tags": {
+      "genres": ["ambient", "post-rock"],
+      "moods": ["calm", "dreamy"],
+      "activities": ["sleep", "meditation"],
+      "time_of_day": ["night"],
+      "regions": ["oceania"]
+    }
+  },
+  {
+    "id": "catalog:track:carbon_fiber",
+    "uri": "catalog:track:carbon_fiber",
+    "provider": "catalog",
+    "name": "Carbon Fiber",
+    "artist": "Circuit Break",
+    "album": "Neon Machine",
+    "duration_ms": 190000,
+    "popularity": 78,
+    "release_year": 2020,
+    "preview_url": "https://example.com/audio/carbon_fiber.mp3",
+    "image_url": "https://example.com/images/carbon_fiber.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.45,
+      "energy": 0.93,
+      "danceability": 0.64,
+      "acousticness": 0.02,
+      "instrumentalness": 0.27,
+      "speechiness": 0.04,
+      "liveness": 0.07,
+      "tempo": 150.0,
+      "loudness": -3.5
+    },
+    "tags": {
+      "genres": ["electronic", "industrial"],
+      "moods": ["intense", "driving"],
+      "activities": ["workout", "gaming"],
+      "time_of_day": ["night", "late"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:coastal_breeze",
+    "uri": "catalog:track:coastal_breeze",
+    "provider": "catalog",
+    "name": "Coastal Breeze",
+    "artist": "Maritime",
+    "album": "Low Tide",
+    "duration_ms": 228000,
+    "popularity": 57,
+    "release_year": 2011,
+    "preview_url": "https://example.com/audio/coastal_breeze.mp3",
+    "image_url": "https://example.com/images/coastal_breeze.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.49,
+      "energy": 0.42,
+      "danceability": 0.53,
+      "acousticness": 0.33,
+      "instrumentalness": 0.05,
+      "speechiness": 0.04,
+      "liveness": 0.12,
+      "tempo": 95.0,
+      "loudness": -9.8
+    },
+    "tags": {
+      "genres": ["indie", "surf"],
+      "moods": ["laid_back", "nostalgic"],
+      "activities": ["travel", "afternoon"],
+      "time_of_day": ["afternoon"],
+      "regions": ["oceania", "north_america"]
+    }
+  },
+  {
+    "id": "catalog:track:night_shift",
+    "uri": "catalog:track:night_shift",
+    "provider": "catalog",
+    "name": "Night Shift",
+    "artist": "Chrome Lanterns",
+    "album": "Nocturne",
+    "duration_ms": 214000,
+    "popularity": 76,
+    "release_year": 2023,
+    "preview_url": "https://example.com/audio/night_shift.mp3",
+    "image_url": "https://example.com/images/night_shift.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.42,
+      "energy": 0.88,
+      "danceability": 0.73,
+      "acousticness": 0.06,
+      "instrumentalness": 0.0,
+      "speechiness": 0.09,
+      "liveness": 0.15,
+      "tempo": 128.0,
+      "loudness": -4.1
+    },
+    "tags": {
+      "genres": ["electropop", "synthwave"],
+      "moods": ["intense", "moody"],
+      "activities": ["night_drive", "coding"],
+      "time_of_day": ["night"],
+      "regions": ["global"]
+    }
+  },
+  {
+    "id": "catalog:track:soft_focus",
+    "uri": "catalog:track:soft_focus",
+    "provider": "catalog",
+    "name": "Soft Focus",
+    "artist": "Glass Gardens",
+    "album": "Featherweight",
+    "duration_ms": 236000,
+    "popularity": 59,
+    "release_year": 2015,
+    "preview_url": "https://example.com/audio/soft_focus.mp3",
+    "image_url": "https://example.com/images/soft_focus.jpg",
+    "external_urls": {
+      "spotify": "",
+      "apple": ""
+    },
+    "audio_features": {
+      "valence": 0.36,
+      "energy": 0.38,
+      "danceability": 0.49,
+      "acousticness": 0.52,
+      "instrumentalness": 0.21,
+      "speechiness": 0.04,
+      "liveness": 0.09,
+      "tempo": 90.0,
+      "loudness": -11.8
+    },
+    "tags": {
+      "genres": ["dream pop", "ambient"],
+      "moods": ["pensive", "calm"],
+      "activities": ["study", "late"],
+      "time_of_day": ["night", "late"],
+      "regions": ["global"]
+    }
+  }
+]

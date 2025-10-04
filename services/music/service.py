@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from services.apple.client import AppleMusicClient
 from services.spotify.client import SpotifyClient
-from services.recommendation.hybrid_engine import HybridRecommendationEngine
+from services.recommendation.catalogue import TrackCatalogue
+from services.recommendation.contextual_engine import ContextualRecommendationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,21 @@ class MusicService:
     ) -> None:
         self.spotify = spotify
         self.apple = apple or AppleMusicClient()
-        self.hybrid_engine = HybridRecommendationEngine(spotify) if spotify else None
+        self.catalogue: Optional[TrackCatalogue] = None
+        self.context_engine: Optional[ContextualRecommendationEngine] = None
 
-        if self.hybrid_engine:
-            logger.info("✓ Hybrid recommendation engine initialized")
-        else:
-            logger.warning("✗ Hybrid engine disabled (no Spotify client)")
+        try:
+            self.catalogue = TrackCatalogue()
+            self.context_engine = ContextualRecommendationEngine(self.catalogue)
+            logger.info(
+                "✓ Contextual recommendation engine initialized with %d curated tracks",
+                self.catalogue.size(),
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            logger.error(
+                "✗ Failed to initialise contextual engine (%s) — falling back to provider heuristics",
+                exc,
+            )
 
     async def start(self) -> None:
         tasks = []
@@ -91,45 +101,64 @@ class MusicService:
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Get recommendation list plus the provider source."""
         provider, track_id = self._parse_seed(seed)
-        source = "apple"
+        source = "contextual"
         recommendations: List[Dict[str, Any]] = []
 
-        # Try hybrid personalized recommendations if user_id provided
-        if user_id and self.hybrid_engine:
-            logger.info("Using hybrid engine for user %s (seed: %s)", user_id[:12], seed[:30])
+        seed_features: Optional[Dict[str, Any]] = None
+        if track_id and provider == "spotify" and self.spotify and not self.spotify.demo_mode:
             try:
-                # Get seed track features if available
-                seed_features = None
-                if track_id and self.spotify and not self.spotify.demo_mode:
-                    seed_features = await self.spotify.get_track_features(track_id)
-                    logger.info("Fetched seed track features for hybrid engine")
+                seed_features = await self.spotify.get_track_features(track_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to fetch Spotify audio features for %s (%s)", track_id, exc)
 
-                recommendations = await self.hybrid_engine.get_personalized_recommendations(
-                    user_id=user_id,
-                    seed_track_id=track_id if provider == "spotify" else None,
+        seed_metadata: Dict[str, Any] = {
+            "id": track_id,
+            "name": track_name,
+            "artist": artist_name,
+            "audio_features": seed_features,
+        }
+
+        if self.context_engine:
+            try:
+                recommendations = await self.context_engine.get_recommendations(
+                    seed_track_id=track_id,
+                    seed_metadata=seed_metadata,
                     seed_features=seed_features,
-                    limit=limit,
                     context=context,
+                    limit=limit,
                 )
-                recommendations = await self._ensure_media_assets(recommendations)
-                source = "hybrid"
-                logger.info("✓ Hybrid engine returned %d recommendations", len(recommendations))
-            except Exception as exc:
-                logger.warning("Hybrid recommendations failed (%s), falling back", exc)
+            except Exception as exc:  # pragma: no cover - log and proceed with fallbacks
+                logger.error("Contextual engine failed (%s); falling back to providers", exc)
                 recommendations = []
 
-        # Fallback to basic Spotify recommendations
-        if not recommendations and provider == "spotify" and self.spotify and not self.spotify.demo_mode:
+        if recommendations:
+            recommendations = await self._ensure_media_assets(recommendations)
+            recommendations = self._post_process_recommendations(
+                recommendations,
+                seed_track_id=track_id,
+                seed_name=track_name,
+                seed_artist=artist_name,
+                limit=limit,
+            )
+            return recommendations, source
+
+        source = "spotify"
+        if provider == "spotify" and self.spotify and not self.spotify.demo_mode:
             try:
                 recommendations = await self.spotify.get_recommendations([track_id], limit=limit)
                 recommendations = await self._ensure_media_assets(recommendations)
-                source = "spotify"
+                recommendations = self._post_process_recommendations(
+                    recommendations,
+                    seed_track_id=track_id,
+                    seed_name=track_name,
+                    seed_artist=artist_name,
+                    limit=limit,
+                )
             except Exception as exc:  # pragma: no cover
                 logger.warning("Spotify recommendations failed (%s); using Apple fallback", exc)
                 recommendations = []
-
-        # Fallback to Apple Music
         if not recommendations:
+            source = "apple"
             if provider == "spotify" and (track_name or artist_name):
                 recommendations = await self.apple.get_related_tracks(
                     track_id=None,
@@ -143,22 +172,32 @@ class MusicService:
                     track_name=track_name,
                     artist_name=artist_name,
                     limit=limit,
+                    exclude_ids=[track_id],
                 )
-            source = "apple"
 
         if not recommendations and self.apple:
             fallback_query = artist_name or track_name
             if fallback_query:
+                source = "apple"
                 recommendations = await self.apple.search_tracks(fallback_query, limit=limit)
                 if provider == "apple" and track_id:
                     recommendations = [t for t in recommendations if t.get("id") != track_id]
                 recommendations = recommendations[:limit]
-                source = "apple"
 
         if not recommendations and self.apple and (track_name or artist_name):
-            genre_query = f"{artist_name} similar artists" if artist_name else f"{track_name} similar songs"
-            recommendations = await self.apple.search_tracks(genre_query, limit=limit)
             source = "apple"
+            genre_query = (
+                f"{artist_name} similar artists" if artist_name else f"{track_name} similar songs"
+            )
+            recommendations = await self.apple.search_tracks(genre_query, limit=limit)
+
+        recommendations = self._post_process_recommendations(
+            recommendations,
+            seed_track_id=track_id,
+            seed_name=track_name,
+            seed_artist=artist_name,
+            limit=limit,
+        )
 
         return recommendations, source
 
@@ -169,14 +208,14 @@ class MusicService:
         interaction_type: str,
         track_data: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Track user interactions for personalization."""
-        if self.hybrid_engine:
-            self.hybrid_engine.track_interaction(user_id, track_id, interaction_type, track_data)
+        """Interactions are logged for analytics; recommendations are context-driven only."""
+        logger.debug(
+            "User %s performed %s on %s", user_id, interaction_type, track_id
+        )
 
     def save_recommendation_state(self) -> None:
         """Save recommendation engine state."""
-        if self.hybrid_engine:
-            self.hybrid_engine.save_state()
+        logger.debug("Contextual engine is stateless; nothing to persist")
 
     async def _ensure_media_assets(self, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not tracks or not self.apple:
@@ -208,4 +247,53 @@ class MusicService:
             if scheme in {"itunes", "apple"}:
                 return "apple", identifier
         return "", seed
+
+    @staticmethod
+    def _post_process_recommendations(
+        tracks: List[Dict[str, Any]],
+        *,
+        seed_track_id: Optional[str],
+        seed_name: Optional[str],
+        seed_artist: Optional[str],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Deduplicate results and remove the seed track itself."""
+        if not tracks:
+            return []
+
+        normalized_seed_name = seed_name.lower().strip() if seed_name else None
+        normalized_seed_artist = seed_artist.lower().strip() if seed_artist else None
+        seed_track_id = seed_track_id or ""
+
+        unique: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for track in tracks:
+            track_id = str(track.get("id")) if track.get("id") is not None else ""
+            if not track_id:
+                continue
+
+            if seed_track_id and track_id == seed_track_id:
+                continue
+
+            if track_id in seen_ids:
+                continue
+
+            name = track.get("name", "").lower().strip()
+            artist = track.get("artist", "").lower().strip()
+
+            if normalized_seed_name:
+                same_name = name == normalized_seed_name
+                same_artist = normalized_seed_artist and artist == normalized_seed_artist
+                if same_name and (not normalized_seed_artist or same_artist):
+                    # Skip exact match to the seed
+                    continue
+
+            unique.append(track)
+            seen_ids.add(track_id)
+
+            if len(unique) >= limit:
+                break
+
+        return unique
 

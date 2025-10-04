@@ -132,13 +132,19 @@ async def search_songs(
 @limiter.limit("20/minute")
 async def get_recommendations(
     request: Request,
-    seed: str = Query(..., description="Seed track URI or ID"),
+    seed: str = Query("", description="Seed track URI or ID (optional)"),
     limit: int = Query(5, ge=1, le=20, description="Number of recommendations"),
     track_name: Optional[str] = Query(None, description="Seed track name for non-Spotify IDs"),
     artist_name: Optional[str] = Query(None, description="Seed artist name for non-Spotify IDs"),
-    user_id: Optional[str] = Query(None, description="User ID for personalized recommendations"),
+    user_id: Optional[str] = Query(None, description="User ID (retained for backwards compatibility)"),
     time_of_day: Optional[str] = Query(None, description="Context: morning/afternoon/evening/night"),
     mood: Optional[str] = Query(None, description="Context: upbeat/calm/energetic"),
+    activity: Optional[str] = Query(None, description="Context: focus/workout/relax/etc."),
+    genre: Optional[str] = Query(None, description="Preferred genre hint"),
+    energy: Optional[str] = Query(None, description="Energy level: low/medium/high"),
+    tempo: Optional[str] = Query(None, description="Tempo bucket or BPM"),
+    era: Optional[str] = Query(None, description="Era preference: recent/2010s/classic"),
+    region: Optional[str] = Query(None, description="Regional focus"),
 ):
     """Get song recommendations based on a seed track with optional personalization."""
     start_time = time.time()
@@ -148,15 +154,27 @@ async def get_recommendations(
     spotify_client: Optional[SpotifyClient] = getattr(request.app.state, "spotify", None)
 
     # Build context dict
-    context = {}
+    context: Dict[str, Any] = {}
     if time_of_day:
         context["time_of_day"] = time_of_day
     if mood:
         context["mood"] = mood
+    if activity:
+        context["activity"] = activity
+    if genre:
+        context["genre"] = genre
+    if energy:
+        context["energy_level"] = energy
+    if tempo is not None:
+        context["tempo"] = tempo
+    if era:
+        context["era"] = era
+    if region:
+        context["region"] = region
 
     try:
         recommendations_data, source = await music_service.get_recommendations(
-            seed,
+            seed or "",
             limit=limit,
             track_name=track_name,
             artist_name=artist_name,
@@ -172,7 +190,36 @@ async def get_recommendations(
             audio_features: Optional[AudioFeatures] = None
             explanation: List[str] = []
 
-            if provider == "spotify" and spotify_client and not spotify_client.demo_mode:
+            if source == "contextual":
+                components = (track_dict.get("recommendation") or {}).get("components", {})
+                similarity_score = components.get("similarity", 0.72)
+                rank_score = (track_dict.get("recommendation") or {}).get("score", similarity_score)
+
+                feature_payload = track_dict.get("audio_features") or {}
+                if feature_payload:
+                    audio_features = AudioFeatures(**feature_payload)
+
+                top_factors = []
+                if components:
+                    top_factors.append(
+                        f"Audio similarity {int(components.get('similarity', 0) * 100)}%"
+                    )
+                    top_factors.append(
+                        f"Context alignment {int(components.get('context', 0) * 100)}%"
+                    )
+                tags = track_dict.get("tags", {})
+                if tags.get("activities"):
+                    top_factors.append(
+                        f"Activity match: {', '.join(tags['activities'][:2])}"
+                    )
+
+                explanation_dict = {
+                    "top_factors": top_factors[:3],
+                    "similarity_reason": "Catalogue-driven contextual engine",
+                    "ranking_boost": f"Popularity score {track_dict.get('popularity', 0)}%",
+                }
+
+            elif provider == "spotify" and spotify_client and not spotify_client.demo_mode:
                 features_data = await spotify_client.get_track_features(track_dict["id"]) or {}
                 if features_data:
                     audio_features = AudioFeatures(**features_data)
@@ -218,8 +265,8 @@ async def get_recommendations(
         processing_time = int((time.time() - start_time) * 1000)
 
         algorithm = (
-            "Hybrid (Collaborative + Content-Based + Context-Aware)"
-            if source == "hybrid"
+            "Contextual (Catalogue + Audio + Intent)"
+            if source == "contextual"
             else "Spotify Web API + Audio Feature Analysis"
             if source == "spotify"
             else "Apple Music catalog similarity"

@@ -279,6 +279,39 @@ class SpotifyClient:
             logger.warning("Spotify recommendations API failed (%s), allowing Apple Music fallback", exc)
             return []
 
+    async def get_tracks_bulk(self, track_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch full track metadata for a batch of Spotify track IDs."""
+        if self.demo_mode or not track_ids:
+            return {}
+
+        # Preserve order but avoid duplicate network calls
+        seen: set[str] = set()
+        unique_ids = [tid for tid in track_ids if tid and not (tid in seen or seen.add(tid))]
+        if not unique_ids:
+            return {}
+
+        results: Dict[str, Dict[str, Any]] = {}
+
+        for idx in range(0, len(unique_ids), 50):
+            chunk = unique_ids[idx:idx + 50]
+            params = {"ids": ",".join(chunk)}
+
+            try:
+                resp = await self._request("GET", "https://api.spotify.com/v1/tracks", params=params)
+                resp.raise_for_status()
+            except httpx.HTTPError as exc:
+                logger.warning("Spotify tracks lookup failed for chunk starting %s (%s)", chunk[0], exc)
+                continue
+
+            data = resp.json()
+            for item in data.get("tracks", []) or []:
+                if not item or not item.get("id"):
+                    continue
+                parsed = self._parse_spotify_track(item)
+                results[item["id"]] = parsed
+
+        return results
+
     def _parse_spotify_track(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a Spotify track item into our format."""
         # Get highest resolution image
