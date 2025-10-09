@@ -288,6 +288,8 @@ async def get_recommendations(
             processing_time_ms=processing_time
         )
 
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive catch
         logger.error("Recommendations failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Recommendations failed: {str(exc)}")

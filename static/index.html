@@ -4,6 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>One‑Rec — Single Purpose Music Recommendation</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%236366f1'/%3E%3Cpath d='M24 20v20a8 8 0 1 0 4 7V29l12-3v10.5a6 6 0 1 0 4 5.5V18z' fill='%23fff'/%3E%3C/svg%3E"/>
   <style>
     :root {
       color-scheme: dark;
@@ -168,23 +169,6 @@
       gap: var(--gap-4);
     }
 
-    .drop-zone {
-      border: 1px dashed rgba(255,255,255,0.18);
-      border-radius: var(--radius-lg);
-      padding: 1.5rem;
-      text-align: center;
-      color: var(--text-muted);
-      background: rgba(12,12,16,0.6);
-      transition: border-color 0.2s ease, background 0.2s ease;
-      cursor: pointer;
-    }
-
-    .drop-zone.drag-active {
-      border-color: var(--primary);
-      background: rgba(99,102,241,0.12);
-      color: var(--text-primary);
-    }
-
     .playlist-actions {
       display: flex;
       flex-wrap: wrap;
@@ -193,13 +177,43 @@
 
     .playlist-import {
       display: flex;
-      flex-wrap: wrap;
       gap: var(--gap-3);
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .playlist-import .input {
       flex: 1 1 260px;
+    }
+
+    .playlist-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.65rem 1rem;
+      border-radius: var(--radius-md);
+      background: rgba(148,163,184,0.12);
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      min-width: 220px;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    .playlist-status.positive {
+      background: var(--success-10);
+      color: var(--success);
+    }
+
+    .status-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 50%;
+      border: 2px solid currentColor;
+      font-size: 0.8rem;
+      font-weight: 700;
     }
 
     .playlist-summary {
@@ -792,15 +806,9 @@
       <div class="title-group">
         <h2 class="text-2xl font-bold">Bring your own playlist</h2>
         <p>
-          Drop a list of tracks (Spotify links or <code>Song - Artist</code> lines) and well
-          recommend the next song using only your playlist as the catalogue.
+          Paste Spotify links or <code>Song - Artist</code> lines and we'll recommend the next song
+          using only your playlist as the catalogue.
         </p>
-      </div>
-
-      <div class="drop-zone" id="playlistDropZone">
-        <input type="file" id="playlistFileInput" accept=".txt,.csv,.json" hidden />
-        <p><strong>Drag & drop</strong> a text/CSV export, or click to browse.</p>
-        <p class="text-sm">You can also paste straight from Spotify: copy the track list and drop it here.</p>
       </div>
 
       <div class="playlist-import">
@@ -812,15 +820,11 @@
           autocomplete="off"
         />
         <button type="button" class="btn btn-primary btn-sm" id="playlistImportBtn">Import playlist link</button>
+        <div class="playlist-status" id="playlistStatus">
+          <span class="status-icon" id="playlistStatusIcon">○</span>
+          <span id="playlistStatusText">No playlist loaded yet.</span>
+        </div>
       </div>
-
-      <div class="playlist-actions">
-        <button type="button" class="btn btn-outline btn-sm" id="playlistPasteBtn">Paste tracks</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="playlistClearBtn" disabled>Clear</button>
-        <button type="button" class="btn btn-primary btn-sm" id="playlistRecommendBtn" disabled>Recommend from playlist</button>
-      </div>
-
-      <div class="playlist-summary" id="playlistSummary">No playlist loaded yet.</div>
     </section>
 
     <section class="card bg-base-200 shadow-lg input-card">
@@ -1010,14 +1014,11 @@
     const CACHE_TTL_MS = 60 * 1000;
 
     // Elements
-    const playlistDropZone = document.getElementById('playlistDropZone');
-    const playlistFileInput = document.getElementById('playlistFileInput');
-    const playlistPasteBtn = document.getElementById('playlistPasteBtn');
-    const playlistClearBtn = document.getElementById('playlistClearBtn');
-    const playlistRecommendBtn = document.getElementById('playlistRecommendBtn');
-    const playlistSummary = document.getElementById('playlistSummary');
-    const playlistUrlInput = document.getElementById('playlistUrlInput');
     const playlistImportBtn = document.getElementById('playlistImportBtn');
+    const playlistUrlInput = document.getElementById('playlistUrlInput');
+    const playlistStatus = document.getElementById('playlistStatus');
+    const playlistStatusIcon = document.getElementById('playlistStatusIcon');
+    const playlistStatusText = document.getElementById('playlistStatusText');
 
     const songInput = document.getElementById('songInput');
     const searchBtn = document.getElementById('searchBtn');
@@ -1131,23 +1132,80 @@
     let lastPlaylistSummary = null;
 
     function updatePlaylistSummary(message) {
-      if (message) {
-        playlistSummary.textContent = message;
-      } else if (!playlistEntries.length) {
-        if (lastPlaylistSummary && lastPlaylistSummary.name) {
-          playlistSummary.textContent = `${lastPlaylistSummary.name} • No tracks loaded yet.`;
-        } else {
-          playlistSummary.textContent = 'No playlist loaded yet.';
-        }
-      } else {
-        const withIds = playlistEntries.filter(entry => entry.spotify_id).length;
-        const prefix = lastPlaylistSummary && lastPlaylistSummary.name ? `${lastPlaylistSummary.name} • ` : '';
-        playlistSummary.textContent = `${prefix}${playlistEntries.length} tracks ready (${withIds} with Spotify IDs).`;
+      if (!playlistStatusText || !playlistStatusIcon || !playlistStatus) {
+        return;
       }
 
+      let statusMessage = message;
+
+      if (!statusMessage) {
+        if (!playlistEntries.length) {
+          statusMessage = lastPlaylistSummary && lastPlaylistSummary.name
+            ? `${lastPlaylistSummary.name} • No tracks loaded yet.`
+            : 'No playlist loaded yet.';
+        } else if (lastPlaylistSummary) {
+          const {
+            name,
+            playlist_size,
+            resolved_tracks,
+            top_moods = [],
+            top_activities = [],
+            top_genres = [],
+            regions = [],
+            energy_level,
+            tempo,
+            era,
+          } = lastPlaylistSummary;
+
+          const details = [];
+          if (top_moods.length) {
+            details.push(`Moods: ${top_moods.slice(0, 2).join(', ')}`);
+          }
+          if (top_activities.length) {
+            details.push(`Activities: ${top_activities.slice(0, 2).join(', ')}`);
+          }
+          if (energy_level) {
+            details.push(`Energy: ${energy_level}`);
+          }
+          if (tempo) {
+            details.push(`Tempo: ${tempo}`);
+          }
+          if (era) {
+            details.push(`Era: ${era}`);
+          }
+          if (!details.length && top_genres.length) {
+            details.push(`Genres: ${top_genres.slice(0, 2).join(', ')}`);
+          }
+          if (!details.length && regions.length) {
+            details.push(`Regions: ${regions.slice(0, 2).join(', ')}`);
+          }
+
+          const analysedCount =
+            typeof playlist_size === 'number'
+              ? `${playlist_size} tracks analysed`
+              : `${playlistEntries.length} tracks ready`;
+          const resolved =
+            typeof resolved_tracks === 'number'
+              ? ` (${resolved_tracks} resolved)`
+              : '';
+          const prefix = name ? `${name} • ` : '';
+          const suffix = details.length ? ` • ${details.join(' • ')}` : '';
+          statusMessage = `${prefix}${analysedCount}${resolved}${suffix}`.trim();
+        } else {
+          const withIds = playlistEntries.filter(entry => entry.spotify_id).length;
+          statusMessage = `${playlistEntries.length} tracks ready (${withIds} with Spotify IDs).`;
+        }
+      }
+
+      playlistStatusText.textContent = statusMessage;
+
       const hasEntries = playlistEntries.length > 0;
-      playlistRecommendBtn.disabled = !hasEntries;
-      playlistClearBtn.disabled = !hasEntries;
+      playlistStatus.classList.toggle('positive', hasEntries);
+      playlistStatusIcon.textContent = hasEntries ? '✔' : '○';
+
+      if (searchBtn) {
+        searchBtn.disabled = !hasEntries;
+      }
     }
 
     function loadPlaylistFromText(text) {
@@ -1163,27 +1221,20 @@
       updatePlaylistSummary();
     }
 
-    function handlePlaylistFileInput(fileList) {
-      if (!fileList || !fileList.length) return;
-      const file = fileList[0];
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        loadPlaylistFromText(event.target?.result || '');
-        playlistFileInput.value = '';
-      };
-      reader.readAsText(file);
-      lastPlaylistSummary = null;
-    }
-
-    async function importPlaylistFromUrl() {
-      const url = (playlistUrlInput?.value || '').trim();
+    async function importPlaylistFromUrl(initialUrl) {
+      let url = (initialUrl || playlistUrlInput?.value || '').trim();
+      if (!url && playlistUrlInput) {
+        playlistUrlInput.focus();
+      }
       if (!url) {
-        updatePlaylistSummary('Paste a Spotify playlist link first.');
+        updatePlaylistSummary('Paste a Spotify playlist link to begin.');
         return;
       }
 
-      playlistImportBtn.disabled = true;
-      playlistImportBtn.textContent = 'Importing…';
+      if (playlistImportBtn) {
+        playlistImportBtn.disabled = true;
+        playlistImportBtn.textContent = 'Importing…';
+      }
       updatePlaylistSummary('Importing playlist…');
 
       try {
@@ -1220,8 +1271,10 @@
         console.error('Playlist import failed:', error);
         updatePlaylistSummary('Failed to import playlist link. Make sure it is public and try again.');
       } finally {
-        playlistImportBtn.disabled = false;
-        playlistImportBtn.textContent = 'Import playlist link';
+        if (playlistImportBtn) {
+          playlistImportBtn.disabled = false;
+          playlistImportBtn.textContent = 'Import playlist link';
+        }
       }
     }
 
@@ -1566,61 +1619,8 @@
     // Playlist interactions
     updatePlaylistSummary();
 
-    playlistDropZone.addEventListener('click', () => playlistFileInput.click());
-
-    playlistDropZone.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      playlistDropZone.classList.add('drag-active');
-    });
-
-    playlistDropZone.addEventListener('dragenter', (event) => {
-      event.preventDefault();
-      playlistDropZone.classList.add('drag-active');
-    });
-
-    playlistDropZone.addEventListener('dragleave', (event) => {
-      if (event.target === playlistDropZone) {
-        playlistDropZone.classList.remove('drag-active');
-      }
-    });
-
-    playlistDropZone.addEventListener('drop', (event) => {
-      event.preventDefault();
-      playlistDropZone.classList.remove('drag-active');
-      if (event.dataTransfer?.files?.length) {
-        handlePlaylistFileInput(event.dataTransfer.files);
-      } else {
-        const text = event.dataTransfer?.getData('text/plain');
-        if (text) {
-          loadPlaylistFromText(text);
-        }
-      }
-    });
-
-    playlistFileInput.addEventListener('change', (event) => {
-      handlePlaylistFileInput(event.target?.files || []);
-    });
-
-    playlistPasteBtn.addEventListener('click', () => {
-      const pasted = window.prompt('Paste track lines or Spotify links:');
-      if (pasted) {
-        loadPlaylistFromText(pasted);
-      }
-    });
-
-    playlistClearBtn.addEventListener('click', () => {
-      playlistEntries = [];
-      lastPlaylistSummary = null;
-      if (playlistUrlInput) {
-        playlistUrlInput.value = '';
-      }
-      updatePlaylistSummary();
-    });
-
-    playlistRecommendBtn.addEventListener('click', requestPlaylistRecommendation);
-
     if (playlistImportBtn) {
-      playlistImportBtn.addEventListener('click', importPlaylistFromUrl);
+      playlistImportBtn.addEventListener('click', () => importPlaylistFromUrl());
     }
 
     if (playlistUrlInput) {
@@ -1633,119 +1633,37 @@
     }
 
     async function handleRecommendation(inputTrack) {
+      if (!playlistEntries.length) {
+        alert('Import a playlist first so we can personalise the recommendation.');
+        return;
+      }
+
       try {
         hideSuggestions();
-
-        // Get personalized recommendations with context
-        const params = new URLSearchParams({
-          seed: inputTrack.uri || inputTrack.id || '',
-          limit: '10',
-          user_id: getUserId(),
-          time_of_day: getTimeOfDay()
-        });
-        if (inputTrack.name) params.set('track_name', inputTrack.name);
-        if (inputTrack.artist) params.set('artist_name', inputTrack.artist);
 
         // Track that user searched for this track
         trackInteraction(inputTrack.id || inputTrack.uri, 'play', inputTrack.name, inputTrack.artist);
 
-        const recData = await apiGet(`${API_BASE}/api/v1/recommendations?${params.toString()}`);
-
-        if (!recData.recommendations || !recData.recommendations[0]) {
-          throw new Error('No recommendations found');
+        const seed = inputTrack.uri || (inputTrack.id ? `spotify:track:${inputTrack.id}` : '');
+        const context = {};
+        const timeOfDay = getTimeOfDay();
+        if (timeOfDay) {
+          context.time_of_day = timeOfDay;
         }
 
-        // Store all recommendations
-        allRecommendations = recData.recommendations;
-        currentRecIndex = 0;
+        const payload = {
+          tracks: playlistEntries.map(entry => ({
+            ...entry,
+            seed: !!entry.seed,
+          })),
+          seed: seed || undefined,
+          limit: 10,
+          context: Object.keys(context).length ? context : undefined,
+          min_popularity: 0,
+        };
 
-        console.log(`Got ${allRecommendations.length} recommendations, showing #1`);
-        console.log('Algorithm:', recData.algorithm);
-        console.log('Source:', recData.source);
+        updatePlaylistSummary(`Analysing ${playlistEntries.length} tracks…`);
 
-        const recommendation = allRecommendations[currentRecIndex];
-        
-        // Update UI
-        inputSummary.textContent = `${inputTrack.name} — ${inputTrack.artist}`;
-        recTitle.textContent = recommendation.name;
-        recArtist.textContent = recommendation.artist;
-        const placeholder = 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="100%" height="100%" fill="#1f1f1f"/><text x="50%" y="50%" fill="#999" font-size="24" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle">No Cover</text></svg>`);
-        console.log('Recommendation data:', {
-          id: recommendation.id,
-          image_url: recommendation.image_url,
-          preview_url: recommendation.preview_url
-        });
-        recArtwork.src = recommendation.image_url || placeholder;
-        recArtwork.referrerPolicy = 'no-referrer';
-        
-        // Tags
-        recTags.textContent = '';
-        const tags = [
-          { label: 'Album', value: recommendation.album },
-          { label: 'Popularity', value: `${recommendation.popularity}%` },
-          { label: 'Year', value: new Date(recommendation.release_date || Date.now()).getFullYear() }
-        ].filter(tag => tag.value && tag.value !== 'undefined%');
-        
-        tags.forEach(tag => {
-          renderTag(recTags, tag);
-        });
-
-        // Similarity (mock calculation based on popularity)
-        const similarity = Math.min(95, Math.max(75, recommendation.similarity_score * 100 || (85 + Math.random() * 10)));
-        similarityScore.textContent = `${Math.round(similarity)}%`;
-        similarityFill.style.width = `${similarity}%`;
-
-        // Initialize audio player with artist name for tracking
-        initializeAudioPlayer(
-          recommendation.preview_url,
-          recommendation.name,
-          recommendation.id,
-          recommendation.artist
-        );
-
-        const external = recommendation.external_urls || {};
-        const query = `${recommendation.name || ''} ${recommendation.artist || ''}`.trim();
-        const encodedQuery = encodeURIComponent(query || recommendation.name || '');
-
-        const spotifyHref = external.spotify || `https://open.spotify.com/search/${encodedQuery}`;
-        spotifyLink.href = spotifyHref;
-        spotifyLink.textContent = external.spotify ? '🎧 Open in Spotify' : '🎧 Search Spotify';
-
-        const appleHref =
-          external.appleMusic ||
-          external.itunes ||
-          `https://music.apple.com/us/search?term=${encodedQuery}`;
-        appleMusicLink.href = appleHref;
-        appleMusicLink.textContent = (external.appleMusic || external.itunes) ? '🍎 Open in Apple Music' : '🍎 Search Apple Music';
-
-        // Update recommendation counter
-        updateRecCounter();
-
-        // Show results
-        resultSection.classList.remove('hidden');
-        resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-      } catch (error) {
-        console.error('Recommendation failed:', error);
-        alert('Could not get recommendation. Please try again.');
-      }
-    }
-
-    async function requestPlaylistRecommendation() {
-      if (!playlistEntries.length) return;
-
-      const payload = {
-        tracks: playlistEntries.map(entry => ({ ...entry })),
-        limit: 10,
-        context: { time_of_day: getTimeOfDay() },
-        min_popularity: 0
-      };
-
-      playlistRecommendBtn.disabled = true;
-      playlistRecommendBtn.textContent = 'Analysing…';
-      updatePlaylistSummary(`Analysing ${playlistEntries.length} tracks…`);
-
-      try {
         const response = await fetch(`${API_BASE}/api/v1/playlist/recommendations`, {
           method: 'POST',
           headers: {
@@ -1768,23 +1686,23 @@
         allRecommendations = data.recommendations;
         currentRecIndex = 0;
         lastPlaylistSummary = data.playlist || null;
-        const playlistLabel = lastPlaylistSummary?.name || 'Playlist';
-        const analysedCount = lastPlaylistSummary?.loaded_tracks ?? playlistEntries.length;
-        inputSummary.textContent = `${playlistLabel} • ${analysedCount} tracks analysed`;
-        renderRecommendation(allRecommendations[currentRecIndex]);
 
+        const summaryParts = [];
+        if (inputTrack.name) summaryParts.push(inputTrack.name);
+        if (inputTrack.artist) summaryParts.push(`by ${inputTrack.artist}`);
+        inputSummary.textContent = summaryParts.length ? summaryParts.join(' ') : 'Seed track';
+
+        renderRecommendation(allRecommendations[currentRecIndex]);
         updatePlaylistSummary();
 
         resultSection.classList.remove('hidden');
         resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+        console.log(`Playlist-personalised recommendations received: ${allRecommendations.length}`);
       } catch (error) {
-        console.error('Playlist recommendation failed:', error);
-        alert('Could not analyse the playlist. Please check the format and try again.');
+        console.error('Recommendation failed:', error);
+        alert(error.message || 'Could not get recommendation. Please try again.');
         updatePlaylistSummary('Playlist analysis failed. Adjust the input and retry.');
-      } finally {
-        playlistRecommendBtn.textContent = 'Recommend from playlist';
-        playlistRecommendBtn.disabled = playlistEntries.length === 0;
       }
     }
 
@@ -1873,10 +1791,3 @@
   </script>
 </body>
 </html>
-
-
-
-
-
-
-

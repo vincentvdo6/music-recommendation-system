@@ -106,6 +106,14 @@ class PlaylistContext(BaseModel):
 class PlaylistSummary(BaseModel):
     playlist_size: int
     resolved_tracks: int
+    top_moods: List[str] = Field(default_factory=list)
+    top_activities: List[str] = Field(default_factory=list)
+    top_genres: List[str] = Field(default_factory=list)
+    regions: List[str] = Field(default_factory=list)
+    time_of_day: Optional[str] = None
+    energy_level: Optional[str] = None
+    tempo: Optional[str] = None
+    era: Optional[str] = None
 
 
 class PlaylistRecommendationsRequest(BaseModel):

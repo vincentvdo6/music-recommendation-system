@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from copy import deepcopy
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from services.recommendation.audio_similarity import AudioSimilarityEngine
 from services.recommendation.catalogue import TrackCatalogue
@@ -151,6 +152,113 @@ class ContextualRecommendationEngine:
         self.weights = weights or self.DEFAULT_WEIGHTS
 
     # ------------------------------------------------------------------
+    def build_user_profile(self, playlist_entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+        """Derive a preference profile from a user-supplied playlist."""
+
+        entries = [entry for entry in playlist_entries if entry]
+        if not entries:
+            raise ValueError("Cannot build user profile from an empty playlist")
+
+        feature_totals: Dict[str, float] = {}
+        feature_counts: Dict[str, int] = {}
+
+        tag_counters = {
+            "moods": Counter(),
+            "activities": Counter(),
+            "genres": Counter(),
+            "time_of_day": Counter(),
+            "regions": Counter(),
+        }
+
+        release_years: List[int] = []
+        canonical_tracks: Set[Tuple[str, str]] = set()
+        playlist_track_ids: Set[str] = set()
+
+        for entry in entries:
+            track_id = entry.get("id")
+            if track_id:
+                playlist_track_ids.add(str(track_id))
+
+            name_key = (
+                _canonical(entry.get("name", "")),
+                _canonical(entry.get("artist", "")),
+            )
+            if any(name_key):
+                canonical_tracks.add(name_key)
+
+            features = entry.get("audio_features") or {}
+            for key, value in features.items():
+                if value is None:
+                    continue
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    continue
+                feature_totals[key] = feature_totals.get(key, 0.0) + numeric
+                feature_counts[key] = feature_counts.get(key, 0) + 1
+
+            tags = entry.get("tags") or {}
+            for group, counter in tag_counters.items():
+                values = tags.get(group)
+                if not values:
+                    continue
+                if isinstance(values, str):
+                    values = [values]
+                for tag in values:
+                    if not tag:
+                        continue
+                    counter[_canonical(tag)] += 1
+
+            release_year = entry.get("release_year")
+            if isinstance(release_year, int):
+                release_years.append(release_year)
+
+        audio_features = {
+            key: feature_totals[key] / feature_counts[key]
+            for key in feature_totals
+            if feature_counts.get(key)
+        }
+
+        if not audio_features:
+            raise ValueError("Playlist tracks are missing audio features; unable to build profile")
+
+        def top_list(counter: Counter, limit: int) -> List[str]:
+            return [item for item, _ in counter.most_common(limit)]
+
+        average_year = sum(release_years) / len(release_years) if release_years else None
+        inferred_era = self._infer_era_from_year(average_year) if average_year else None
+
+        average_tempo = audio_features.get("tempo")
+        tempo_bucket = self._tempo_bucket(average_tempo) if average_tempo else None
+
+        average_energy = audio_features.get("energy")
+        energy_level = self._energy_level_from_feature(average_energy) if average_energy is not None else None
+
+        context = {
+            "moods": top_list(tag_counters["moods"], 3),
+            "activities": top_list(tag_counters["activities"], 3),
+            "genres": top_list(tag_counters["genres"], 5),
+            "regions": top_list(tag_counters["regions"], 3),
+        }
+
+        time_of_day = top_list(tag_counters["time_of_day"], 1)
+        if time_of_day:
+            context["time_of_day"] = time_of_day[0]
+        if tempo_bucket:
+            context["tempo"] = tempo_bucket
+        if energy_level:
+            context["energy_level"] = energy_level
+        if inferred_era:
+            context["era"] = inferred_era
+
+        return {
+            "audio_features": audio_features,
+            "context": context,
+            "canonical_tracks": canonical_tracks,
+            "track_ids": playlist_track_ids,
+        }
+
+    # ------------------------------------------------------------------
     async def get_recommendations(
         self,
         *,
@@ -158,24 +266,54 @@ class ContextualRecommendationEngine:
         seed_metadata: Optional[Dict[str, Any]] = None,
         seed_features: Optional[Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Return context-aware recommendations without relying on user history."""
+        """Return context-aware recommendations using a playlist-personalised profile."""
 
-        context = context or {}
+        if not user_profile:
+            raise ValueError(
+                "user_profile is required. Build it from a playlist before requesting recommendations."
+            )
+
         limit = max(1, min(limit, 50))
 
+        merged_context = self._merge_context(user_profile.get("context") or {}, context or {})
+        normalised_context = self._normalise_context(merged_context)
+
         seed_entry = self._resolve_seed_entry(seed_track_id, seed_metadata)
+        if not seed_features and seed_metadata and seed_metadata.get("audio_features"):
+            seed_features = seed_metadata["audio_features"]
+
         if not seed_features and seed_entry:
             seed_features = seed_entry.get("audio_features")
 
-        target_profile = self._build_target_profile(seed_features, context, seed_entry)
-        normalised_context = self._normalise_context(context)
+        target_profile = self._build_target_profile(
+            seed_features,
+            merged_context,
+            seed_entry,
+            user_profile=user_profile,
+        )
 
         candidates = self.catalogue.all_tracks()
         scored: List[Dict[str, Any]] = []
 
+        playlist_track_ids: Set[str] = set(user_profile.get("track_ids", set()))
+        canonical_exclusions: Set[Tuple[str, str]] = set(user_profile.get("canonical_tracks", set()))
+
         for candidate in candidates:
+            candidate_id = candidate.get("id")
+            if candidate_id and candidate_id in playlist_track_ids:
+                continue
+
+            if canonical_exclusions:
+                name_key = (
+                    _canonical(candidate.get("name", "")),
+                    _canonical(candidate.get("artist", "")),
+                )
+                if name_key[0] and name_key in canonical_exclusions:
+                    continue
+
             if seed_entry and candidate.get("id") == seed_entry.get("id"):
                 continue
 
@@ -238,10 +376,14 @@ class ContextualRecommendationEngine:
         seed_features: Optional[Dict[str, Any]],
         context: Dict[str, Any],
         seed_entry: Optional[Dict[str, Any]],
+        user_profile: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, float]]:
         """Blend seed features and context-derived hints into a target profile."""
 
         components: List[Tuple[Dict[str, Any], float]] = []
+
+        if user_profile and user_profile.get("audio_features"):
+            components.append((user_profile["audio_features"], 1.2))
 
         if seed_features:
             components.append((seed_features, 1.0))
@@ -394,6 +536,115 @@ class ContextualRecommendationEngine:
             normalised["regions"] = [_canonical(region) for region in regions]
 
         return normalised
+
+    def _merge_context(
+        self,
+        user_context: Dict[str, Any],
+        request_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge context inferred from the playlist with explicit request overrides."""
+
+        merged: Dict[str, Any] = {}
+
+        def extend_list(key: str, value: Any) -> None:
+            existing = merged.get(key) or []
+            if isinstance(existing, str):
+                existing = [existing]
+            values: List[str]
+            if isinstance(value, str):
+                values = [value]
+            elif isinstance(value, Iterable):
+                values = list(value)
+            else:
+                return
+
+            combined = existing[:]
+            for item in values:
+                if item is None:
+                    continue
+                if item not in combined:
+                    combined.append(item)
+            merged[key] = combined
+
+        def set_if_empty(key: str, value: Any) -> None:
+            if value is None:
+                return
+            if key not in merged or merged[key] in (None, "", [], ()):
+                merged[key] = value
+
+        for context_source in (user_context or {}, request_context or {}):
+            for key, value in (context_source or {}).items():
+                if key in {"moods", "mood", "activities", "activity", "genres", "genre", "regions", "region"}:
+                    canonical_key = key
+                    if key == "mood":
+                        canonical_key = "moods"
+                    elif key == "activity":
+                        canonical_key = "activities"
+                    elif key == "genre":
+                        canonical_key = "genres"
+                    elif key == "region":
+                        canonical_key = "regions"
+                    extend_list(canonical_key, value)
+                elif key in {"time_of_day", "time"}:
+                    set_if_empty("time_of_day", value)
+                elif key in {"energy_level", "energy"}:
+                    set_if_empty("energy_level", value)
+                elif key == "tempo":
+                    set_if_empty("tempo", value)
+                elif key in {"era", "decade"}:
+                    set_if_empty("era", value)
+                else:
+                    merged[key] = value
+
+        return merged
+
+    def _infer_era_from_year(self, year: float) -> Optional[str]:
+        """Map an average release year to one of the configured era buckets."""
+        if year is None:
+            return None
+
+        year_int = int(round(year))
+        ranking = [
+            ("current", self.ERA_PRESETS["current"]),
+            ("recent", self.ERA_PRESETS["recent"]),
+            ("2015+", self.ERA_PRESETS["2015+"]),
+            ("2010s", self.ERA_PRESETS["2010s"]),
+            ("2000s", self.ERA_PRESETS["2000s"]),
+            ("classic", self.ERA_PRESETS["classic"]),
+        ]
+        for label, (start, end) in ranking:
+            if start <= year_int <= end:
+                return label
+
+        if year_int >= 2020:
+            return "current"
+        if year_int >= 2016:
+            return "recent"
+        if year_int >= 2010:
+            return "2010s"
+        if year_int >= 2000:
+            return "2000s"
+        return "classic"
+
+    @staticmethod
+    def _tempo_bucket(tempo: float) -> str:
+        """Derive the closest tempo bucket for a numeric tempo value."""
+        if tempo <= 90:
+            return "slow"
+        if tempo <= 115:
+            return "medium"
+        if tempo <= 135:
+            return "fast"
+        return "very fast"
+
+    @staticmethod
+    def _energy_level_from_feature(energy: float) -> str:
+        """Convert raw energy into the discrete buckets used by the engine."""
+        if energy >= 0.7:
+            return "high"
+        if energy >= 0.45:
+            return "medium"
+        return "low"
 
     def _score_candidate(
         self,

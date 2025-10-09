@@ -101,106 +101,9 @@ class MusicService:
         context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Get recommendation list plus the provider source."""
-        provider, track_id = self._parse_seed(seed)
-        source = "contextual"
-        recommendations: List[Dict[str, Any]] = []
-
-        seed_features: Optional[Dict[str, Any]] = None
-        if track_id and provider == "spotify" and self.spotify and not self.spotify.demo_mode:
-            try:
-                seed_features = await self.spotify.get_track_features(track_id)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to fetch Spotify audio features for %s (%s)", track_id, exc)
-
-        seed_metadata: Dict[str, Any] = {
-            "id": track_id,
-            "name": track_name,
-            "artist": artist_name,
-            "audio_features": seed_features,
-        }
-
-        if self.context_engine:
-            try:
-                recommendations = await self.context_engine.get_recommendations(
-                    seed_track_id=track_id,
-                    seed_metadata=seed_metadata,
-                    seed_features=seed_features,
-                    context=context,
-                    limit=limit,
-                )
-            except Exception as exc:  # pragma: no cover - log and proceed with fallbacks
-                logger.error("Contextual engine failed (%s); falling back to providers", exc)
-                recommendations = []
-
-        if recommendations:
-            recommendations = await self._ensure_media_assets(recommendations)
-            recommendations = self._post_process_recommendations(
-                recommendations,
-                seed_track_id=track_id,
-                seed_name=track_name,
-                seed_artist=artist_name,
-                limit=limit,
-            )
-            return recommendations, source
-
-        source = "spotify"
-        if provider == "spotify" and self.spotify and not self.spotify.demo_mode:
-            try:
-                recommendations = await self.spotify.get_recommendations([track_id], limit=limit)
-                recommendations = await self._ensure_media_assets(recommendations)
-                recommendations = self._post_process_recommendations(
-                    recommendations,
-                    seed_track_id=track_id,
-                    seed_name=track_name,
-                    seed_artist=artist_name,
-                    limit=limit,
-                )
-            except Exception as exc:  # pragma: no cover
-                logger.warning("Spotify recommendations failed (%s); using Apple fallback", exc)
-                recommendations = []
-        if not recommendations:
-            source = "apple"
-            if provider == "spotify" and (track_name or artist_name):
-                recommendations = await self.apple.get_related_tracks(
-                    track_id=None,
-                    track_name=track_name,
-                    artist_name=artist_name,
-                    limit=limit,
-                )
-            elif provider == "apple" and track_id:
-                recommendations = await self.apple.get_related_tracks(
-                    track_id=track_id,
-                    track_name=track_name,
-                    artist_name=artist_name,
-                    limit=limit,
-                    exclude_ids=[track_id],
-                )
-
-        if not recommendations and self.apple:
-            fallback_query = artist_name or track_name
-            if fallback_query:
-                source = "apple"
-                recommendations = await self.apple.search_tracks(fallback_query, limit=limit)
-                if provider == "apple" and track_id:
-                    recommendations = [t for t in recommendations if t.get("id") != track_id]
-                recommendations = recommendations[:limit]
-
-        if not recommendations and self.apple and (track_name or artist_name):
-            source = "apple"
-            genre_query = (
-                f"{artist_name} similar artists" if artist_name else f"{track_name} similar songs"
-            )
-            recommendations = await self.apple.search_tracks(genre_query, limit=limit)
-
-        recommendations = self._post_process_recommendations(
-            recommendations,
-            seed_track_id=track_id,
-            seed_name=track_name,
-            seed_artist=artist_name,
-            limit=limit,
+        raise RuntimeError(
+            "Playlist personalization required. Submit a playlist via the playlist recommendations endpoint to tailor results."
         )
-
-        return recommendations, source
 
     async def recommend_from_playlist(
         self,
@@ -284,11 +187,30 @@ class MusicService:
             min_popularity=min_popularity,
         )
 
-        if not entries:
-            raise RuntimeError("Playlist tracks were filtered out (missing features or below popularity threshold)")
+        # Fallback: enrich with curated catalogue matches when Spotify features are missing
+        if self.context_engine and self.catalogue:
+            seen_ids: set[str] = {entry["id"] for entry in entries}
+            for item in normalised_inputs:
+                candidate = None
+                spotify_id = item.get("spotify_id")
+                if spotify_id:
+                    candidate = self.catalogue.get_by_id(spotify_id)
+                if not candidate:
+                    candidate = self.catalogue.find_best_match(item.get("name"), item.get("artist"))
+                if candidate and candidate["id"] not in seen_ids:
+                    entries.append(candidate)
+                    seen_ids.add(candidate["id"])
+                    tracks_map.setdefault(candidate["id"], candidate)
 
-        dynamic_catalogue = TrackCatalogue(entries=entries)
-        dynamic_engine = ContextualRecommendationEngine(dynamic_catalogue)
+        if not entries:
+            raise RuntimeError(
+                "Playlist tracks were filtered out (missing features or below popularity threshold)"
+            )
+
+        if not self.context_engine:
+            raise RuntimeError("Curated engine unavailable; cannot personalise recommendations")
+
+        user_profile = self.context_engine.build_user_profile(entries)
 
         seed_id = self._extract_spotify_id(seed) if seed else None
         if not seed_id:
@@ -298,22 +220,37 @@ class MusicService:
                     break
 
         seed_metadata = tracks_map.get(seed_id) if seed_id else None
+        if not seed_metadata and tracks_map:
+            seed_metadata = next(iter(tracks_map.values()))
+            seed_id = seed_metadata.get("id")
+
         seed_features = features_map.get(seed_id) if seed_id else None
 
-        recommendations = await dynamic_engine.get_recommendations(
+        recommendations = await self.context_engine.get_recommendations(
             seed_track_id=seed_id,
             seed_metadata=seed_metadata,
             seed_features=seed_features,
             context=context,
+            user_profile=user_profile,
             limit=limit,
         )
 
         # Re-enrich recommendations with Spotify/Apple assets if available
         recommendations = await self._ensure_media_assets(recommendations)
 
+        profile_context = user_profile.get("context", {})
+        resolved_count = len(tracks_map) or len(entries)
         playlist_info = {
             "playlist_size": len(entries),
-            "resolved_tracks": len(tracks_map),
+            "resolved_tracks": resolved_count,
+            "top_moods": profile_context.get("moods", [])[:3],
+            "top_activities": profile_context.get("activities", [])[:3],
+            "top_genres": profile_context.get("genres", [])[:5],
+            "regions": profile_context.get("regions", [])[:3],
+            "time_of_day": profile_context.get("time_of_day"),
+            "energy_level": profile_context.get("energy_level"),
+            "tempo": profile_context.get("tempo"),
+            "era": profile_context.get("era"),
         }
 
         return recommendations, "playlist", playlist_info

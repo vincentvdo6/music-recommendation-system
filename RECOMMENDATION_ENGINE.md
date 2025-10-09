@@ -2,18 +2,25 @@
 
 ## Overview
 
-The music recommendation system now prioritises contextual awareness over user
-history. Instead of collaborative filtering, it combines a curated knowledge base
-of expertly tagged tracks with on-the-fly interpretation of the listener's
-intent. The engine remains accurate even when there is no listening history,
+The music recommendation system now requires a user-supplied playlist to
+personalise results. Instead of collaborative filtering, it combines a curated
+knowledge base of expertly tagged tracks with a profile that is inferred from a
+playlist the listener copies and pastes into the product. The playlist is
+never served back verbatim; its sole purpose is to teach the engine about the
+listener's preferred moods, activities, genres, and audio characteristics before
+the final recommendations are generated from the curated catalogue.
+
+The engine remains accurate even when there is no prior history on the platform,
 making it ideal for fresh users, episodic sessions, or embedded experiences
 where personalised storage is not available.
 
 Key pillars:
 
+- **Playlist personalisation** that derives an averaged audio profile and tag
+  preferences from any playlist the listener provides.
 - **Curated catalogue** of tracks that include audio features, mood/activity
   tags, temporal preferences, and geographic relevance.
-- **Context interpreter** that normalises free-form hints (`mood`, `activity`,
+- **Context interpreter** that normalises optional overrides (`mood`, `activity`,
   `time_of_day`, `energy`, `tempo`, `era`, `region`) into canonical targets.
 - **Audio similarity** via Spotify-style feature vectors when a seed track or
   features are available.
@@ -21,6 +28,18 @@ Key pillars:
   and tuned without guesswork.
 
 ## Architecture
+
+### 0. Playlist Personalisation
+
+File: `services/recommendation/contextual_engine.py` (`build_user_profile`)
+
+- Accepts any playlist the user pastes into the UI (Spotify URLs, IDs, or raw
+  "Song - Artist" strings).
+- Resolves the tracks via Spotify, normalises their audio features, and derives
+  dominant moods, activities, genres, regions, energy band, tempo bucket, and
+  preferred era.
+- Produces a `user_profile` object that is required for every recommendation
+  request.
 
 ### 1. Curated Track Catalogue
 
@@ -100,18 +119,35 @@ results to end-users.
 ## API Usage
 
 ```bash
-GET /api/v1/recommendations?seed=spotify:track:1AbCxyz&limit=8&mood=upbeat&activity=workout&time_of_day=evening
+POST /api/v1/playlist/recommendations
 ```
 
-- `seed` *(optional)*: Spotify/Apple/catalog identifier. Used for audio
-  similarity if features are available. Leave empty for pure context-based
-  picks.
-- `mood`, `activity`, `time_of_day`, `energy`, `tempo`, `era`, `genres`,
-  `regions`: contextual hints. Singular or plural forms are supported.
-- `user_id`: retained for compatibility but no longer affects scoring.
+```json
+{
+  "tracks": [
+    {"raw": "Song One - Artist A"},
+    {"spotify_id": "1AbCxyz123"},
+    {"name": "Song Two", "artist": "Artist B", "seed": true}
+  ],
+  "limit": 6,
+  "min_popularity": 30,
+  "context": {
+    "energy": "high",
+    "regions": ["uk"]
+  }
+}
+```
 
-Response shape mirrors previous versions but `source` will now read
-`"contextual"` when the curated engine is used.
+- `tracks` *(required)*: raw playlist entries pasted by the user. Each entry may
+  be a Spotify URL/URI/ID, `"Song - Artist"` string, or structured metadata.
+- `seed` *(optional)*: Spotify URI to bias towards (defaults to the first track
+  marked with `"seed": true`).
+- `context` *(optional)*: additional overrides layered on top of the playlist
+  profile (same keys as before: `moods`, `activities`, `time_of_day`, `energy`,
+  `tempo`, `era`, `regions`, etc.).
+
+The legacy `GET /api/v1/recommendations` endpoint now returns `400` with a
+message directing callers to the playlist workflow.
 
 ## Extending the Catalogue
 
@@ -153,11 +189,13 @@ Steps:
 
 ## Cold Start & Offline Behaviour
 
-- No user profile storage is required; the engine works immediately after start-up.
+- No user profile storage is required; the engine works immediately after start-up
+  as soon as a playlist is provided.
 - If external APIs are unavailable the system still serves recommendations from
-  the local catalogue.
-- When both seed and context are missing the engine returns the most popular
-  curated tracks, ensuring deterministic behaviour for smoke tests and demos.
+  the local catalogue after the playlist profile has been derived (cached audio
+  features are required for the playlist tracks).
+- When the personalised scoring cannot find suitable candidates the engine falls
+  back to curated trending tracks, still excluding the playlist songs.
 
 ## Future Tweaks
 

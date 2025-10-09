@@ -197,7 +197,11 @@ async def health_check():
 @app.get("/")
 async def root():
     """Serve the main web interface."""
-    return FileResponse('static/index.html')
+    response = FileResponse("static/index.html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/api")

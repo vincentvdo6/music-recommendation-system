@@ -1,52 +1,55 @@
-"""Tests for the context-aware recommendation engine."""
+"""Tests for the playlist-personalised recommendation engine."""
 
 import asyncio
+
+import pytest
 
 from services.recommendation.catalogue import TrackCatalogue
 from services.recommendation.contextual_engine import ContextualRecommendationEngine
 
 
-def test_contextual_engine_handles_context_without_seed():
+def test_engine_requires_user_profile() -> None:
     catalogue = TrackCatalogue()
     engine = ContextualRecommendationEngine(catalogue)
 
-    recommendations = asyncio.run(
-        engine.get_recommendations(
-            seed_track_id=None,
-            seed_metadata=None,
-            context={"mood": "energetic", "activity": "workout", "time_of_day": "evening"},
-            limit=3,
-        )
-    )
-
-    assert recommendations, "Engine should return results for context-only queries"
-
-    top = recommendations[0]
-    assert "recommendation" in top and "components" in top["recommendation"]
-    components = top["recommendation"]["components"]
-    assert components["context"] >= 0.6
-    assert "workout" in {tag.casefold() for tag in top.get("tags", {}).get("activities", [])}
+    with pytest.raises(ValueError):
+        asyncio.run(engine.get_recommendations(limit=3))
 
 
-def test_contextual_engine_skips_seed_track():
+def test_playlist_personalisation_excludes_original_tracks() -> None:
     catalogue = TrackCatalogue()
     engine = ContextualRecommendationEngine(catalogue)
 
-    seed_name = "Still Water"
-    seed_artist = "Eira"
+    playlist_entries = catalogue.all_tracks()[:4]
+    profile = engine.build_user_profile(playlist_entries)
+
+    assert "audio_features" in profile and profile["audio_features"], "Profile should include averaged audio features"
+    assert profile["context"].get("moods"), "Profile should include derived mood preferences"
+
+    seed_entry = playlist_entries[0]
 
     recommendations = asyncio.run(
         engine.get_recommendations(
-            seed_track_id=None,
-            seed_metadata={"name": seed_name, "artist": seed_artist},
-            context={"mood": "calm"},
+            seed_track_id=seed_entry["id"],
+            seed_metadata={"name": seed_entry["name"], "artist": seed_entry["artist"]},
+            seed_features=seed_entry.get("audio_features"),
+            context=None,
+            user_profile=profile,
             limit=5,
         )
     )
 
-    assert recommendations, "Engine should find calming tracks"
-    assert all(track["id"] != "catalog:track:still_water" for track in recommendations)
-    assert any(
-        "ambient" in {tag.casefold() for tag in track.get("tags", {}).get("genres", [])}
+    assert recommendations, "Engine should return personalised recommendations"
+
+    playlist_ids = {entry["id"] for entry in playlist_entries}
+    assert all(track["id"] not in playlist_ids for track in recommendations), "Results should exclude playlist tracks"
+
+    playlist_pairs = {
+        (entry.get("name", "").casefold(), entry.get("artist", "").casefold())
+        for entry in playlist_entries
+    }
+    recommended_pairs = {
+        (track.get("name", "").casefold(), track.get("artist", "").casefold())
         for track in recommendations
-    )
+    }
+    assert playlist_pairs.isdisjoint(recommended_pairs), "Playlist songs should not be repeated in recommendations"

@@ -6,11 +6,10 @@ works instantly using mood, activity, and other situational hints.
 
 ## ✨ Features
 
-- 🔍 **Song Search**: Optional Spotify search when credentials are configured
-- 🧭 **Context-Aware Engine**: Accurate results from curated catalogue + mood/activity cues
-- 🎨 **Beautiful Interface**: Modern, responsive web design
-- 📊 **Audio Insights**: View tempo, energy, danceability, and mood metadata
+- 📋 **Playlist-First Personalisation**: Paste any playlist to build a one-time profile
+- 🧭 **Context-Aware Engine**: Blends playlist-derived tastes with curated catalogue tags
 - 🧠 **Transparent Scoring**: Every recommendation exposes its score breakdown
+- 📊 **Insightful Summaries**: See the moods, activities, tempo, and era detected from your playlist
 - 📴 **Offline Ready**: Works with the built-in catalogue even without Spotify access
 
 ## 🚀 Quick Start
@@ -29,11 +28,10 @@ The server will start automatically and open your browser to http://localhost:80
 
 ## 🎶 How to Use
 
-1. **Search for a song**: Type any song name or artist (e.g., "Bohemian Rhapsody", "Ed Sheeran")
-2. **Drop a playlist (optional)**: Paste a Spotify playlist link or drag a text export into the "Bring your own playlist" panel to use your own catalogue
-3. **Select a track**: Click on any song from the search results  
-4. **Get recommendations**: Click "Get Recommendations" (or "Recommend from playlist") to find similar songs
-5. **Explore**: See why each song was recommended and click Spotify links to listen
+1. **Paste your playlist**: Drop Spotify links or `Song – Artist` lines into the text box.
+2. **Submit once**: The backend confirms the playlist was resolved and builds a profile.
+3. **Review the summary**: See the detected moods, activities, energy, tempo, and era.
+4. **Play recommendations**: Explore the returned tracks—each comes from the curated catalogue and excludes your pasted songs.
 
 ## 📁 Project Structure
 
