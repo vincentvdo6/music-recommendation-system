@@ -30,9 +30,10 @@ The server will start automatically and open your browser to http://localhost:80
 ## 🎶 How to Use
 
 1. **Search for a song**: Type any song name or artist (e.g., "Bohemian Rhapsody", "Ed Sheeran")
-2. **Select a track**: Click on any song from the search results  
-3. **Get recommendations**: Click "Get Recommendations" to find similar songs
-4. **Explore**: See why each song was recommended and click Spotify links to listen
+2. **Drop a playlist (optional)**: Paste a Spotify playlist link or drag a text export into the "Bring your own playlist" panel to use your own catalogue
+3. **Select a track**: Click on any song from the search results  
+4. **Get recommendations**: Click "Get Recommendations" (or "Recommend from playlist") to find similar songs
+5. **Explore**: See why each song was recommended and click Spotify links to listen
 
 ## 📁 Project Structure
 

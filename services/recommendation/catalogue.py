@@ -19,19 +19,26 @@ def _normalize(text: str) -> str:
 class TrackCatalogue:
     """Loads a curated track catalogue with rich semantic metadata."""
 
-    def __init__(self, catalogue_path: Optional[Path | str] = None) -> None:
+    def __init__(
+        self,
+        catalogue_path: Optional[Path | str] = None,
+        *,
+        entries: Optional[List[Dict]] = None,
+    ) -> None:
         root = Path(__file__).resolve().parents[2]
         default_path = root / "data" / "catalogue" / "tracks.json"
         self._catalogue_path = Path(catalogue_path or default_path)
-
-        if not self._catalogue_path.exists():
-            raise FileNotFoundError(f"Catalogue not found at {self._catalogue_path}")
 
         self._tracks: List[Dict] = []
         self._id_index: Dict[str, Dict] = {}
         self._name_index: Dict[Tuple[str, str], Dict] = {}
 
-        self._load_catalogue()
+        if entries is not None:
+            self._load_entries(entries)
+        else:
+            if not self._catalogue_path.exists():
+                raise FileNotFoundError(f"Catalogue not found at {self._catalogue_path}")
+            self._load_catalogue()
 
     # ------------------------------------------------------------------
     # Public API
@@ -170,3 +177,24 @@ class TrackCatalogue:
         entry["tags"] = tags
 
         return entry
+
+    def _load_entries(self, entries: List[Dict]) -> None:
+        normalised: List[Dict] = []
+        skipped = 0
+
+        for raw in entries:
+            entry = self._normalise_entry(raw)
+            if not entry:
+                skipped += 1
+                continue
+            normalised.append(entry)
+
+        if skipped:
+            logger.warning("Skipped %d malformed catalogue entries", skipped)
+
+        self._tracks = normalised
+        self._id_index = {track["id"]: track for track in self._tracks}
+        self._name_index = {
+            (_normalize(track.get("name", "")), _normalize(track.get("artist", ""))): track
+            for track in self._tracks
+        }

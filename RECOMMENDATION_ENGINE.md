@@ -121,6 +121,36 @@ Response shape mirrors previous versions but `source` will now read
    case-insensitive matching and supports light fuzzy comparisons.
 4. Reload the service — no additional preprocessing is required.
 
+### Generating a real-song catalogue automatically
+
+The repo now includes `scripts/build_catalogue.py`, which pulls live Spotify
+metadata (tracks, audio features, artist genres) and writes a ready-to-use
+catalogue file for the contextual engine.
+
+Steps:
+
+1. Ensure `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are present in `.env`.
+2. Run the script with playlists, queries, or explicit track IDs you want to
+   seed:
+
+   ```bash
+   python scripts/build_catalogue.py \
+     --playlist 37i9dQZF1DXcBWIGoYBM5M \
+     --playlist 37i9dQZF1DWXRqgorJj26U \
+     --query "focus lo-fi" --search-limit 40 \
+     --min-popularity 45 \
+     --overwrite
+   ```
+
+   - `--playlist` may be repeated to aggregate editorial or personal playlists.
+   - `--query` uses Spotify search to grab top tracks for the provided phrases.
+   - `--track` (optional) adds one-off track IDs.
+   - Use `--output` to direct the generated JSON elsewhere instead of overwriting
+     the default catalogue.
+
+3. Restart the API (or reload Uvicorn) so `TrackCatalogue` reads the refreshed
+   data on startup.
+
 ## Cold Start & Offline Behaviour
 
 - No user profile storage is required; the engine works immediately after start-up.
@@ -135,4 +165,3 @@ Response shape mirrors previous versions but `source` will now read
 - Add optional machine-learned models to refine context → feature translation.
 - Capture lightweight session feedback (without persistent profiles) to adapt
   weighting during a single listening session.
-

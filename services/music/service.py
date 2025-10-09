@@ -10,6 +10,7 @@ from services.apple.client import AppleMusicClient
 from services.spotify.client import SpotifyClient
 from services.recommendation.catalogue import TrackCatalogue
 from services.recommendation.contextual_engine import ContextualRecommendationEngine
+from services.recommendation.playlist_builder import build_entries
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,171 @@ class MusicService:
 
         return recommendations, source
 
+    async def recommend_from_playlist(
+        self,
+        tracks_payload: List[Dict[str, Any]],
+        *,
+        seed: Optional[str] = None,
+        limit: int = 5,
+        context: Optional[Dict[str, Any]] = None,
+        min_popularity: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+        """Generate recommendations from a user-supplied playlist."""
+
+        if not tracks_payload:
+            return [], "playlist", {"playlist_size": 0}
+
+        if not self.spotify or self.spotify.demo_mode:
+            raise RuntimeError("Spotify credentials required for playlist-based recommendations")
+
+        normalised_inputs = self._normalise_playlist_inputs(tracks_payload)
+
+        spotify_ids: List[str] = []
+        search_descriptors: List[Dict[str, Any]] = []
+
+        for item in normalised_inputs:
+            spotify_id = item.get("spotify_id")
+            if spotify_id:
+                if spotify_id not in spotify_ids:
+                    spotify_ids.append(spotify_id)
+                continue
+
+            if item.get("name"):
+                search_descriptors.append(item)
+
+        tracks_map: Dict[str, Dict[str, Any]] = {}
+        if spotify_ids:
+            fetched = await self.spotify.get_tracks_bulk(spotify_ids)
+            tracks_map.update(fetched)
+
+        search_cache: Dict[Tuple[str, str], Optional[Dict[str, Any]]] = {}
+        for descriptor in search_descriptors:
+            name = descriptor.get("name", "").strip()
+            artist = descriptor.get("artist")
+            cache_key = (name.casefold(), (artist or "").casefold())
+
+            track: Optional[Dict[str, Any]] = search_cache.get(cache_key)
+            if track is None:
+                query = f"{name} {artist}".strip()
+                results = await self.spotify.search_tracks(query, limit=5)
+                track = None
+                if artist:
+                    artist_norm = artist.casefold()
+                    for candidate in results:
+                        if candidate.get("artist", "").casefold() == artist_norm:
+                            track = candidate
+                            break
+                if not track and results:
+                    track = results[0]
+                search_cache[cache_key] = track
+
+            if track:
+                descriptor["spotify_id"] = track["id"]
+                if track["id"] not in tracks_map:
+                    tracks_map[track["id"]] = track
+
+        if not tracks_map:
+            raise RuntimeError("Could not resolve any tracks from supplied playlist data")
+
+        track_ids = list(tracks_map.keys())
+        features_map = await self.spotify.get_tracks_features_bulk(track_ids)
+
+        artist_ids: List[str] = []
+        for track in tracks_map.values():
+            artist_ids.extend(track.get("metadata", {}).get("spotify_artist_ids", []))
+
+        artist_map = await self.spotify.get_artists(artist_ids)
+
+        entries = build_entries(
+            tracks_map,
+            features_map,
+            artist_map,
+            min_popularity=min_popularity,
+        )
+
+        if not entries:
+            raise RuntimeError("Playlist tracks were filtered out (missing features or below popularity threshold)")
+
+        dynamic_catalogue = TrackCatalogue(entries=entries)
+        dynamic_engine = ContextualRecommendationEngine(dynamic_catalogue)
+
+        seed_id = self._extract_spotify_id(seed) if seed else None
+        if not seed_id:
+            for item in normalised_inputs:
+                if item.get("seed") and item.get("spotify_id"):
+                    seed_id = item["spotify_id"]
+                    break
+
+        seed_metadata = tracks_map.get(seed_id) if seed_id else None
+        seed_features = features_map.get(seed_id) if seed_id else None
+
+        recommendations = await dynamic_engine.get_recommendations(
+            seed_track_id=seed_id,
+            seed_metadata=seed_metadata,
+            seed_features=seed_features,
+            context=context,
+            limit=limit,
+        )
+
+        # Re-enrich recommendations with Spotify/Apple assets if available
+        recommendations = await self._ensure_media_assets(recommendations)
+
+        playlist_info = {
+            "playlist_size": len(entries),
+            "resolved_tracks": len(tracks_map),
+        }
+
+        return recommendations, "playlist", playlist_info
+
+    async def import_playlist_from_url(
+        self,
+        playlist_ref: str,
+        *,
+        limit: int = 300,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Resolve a Spotify playlist URL/ID into playlist entries for the UI."""
+
+        if not self.spotify:
+            raise RuntimeError("Spotify client not configured for playlist import")
+
+        try:
+            result = await self.spotify.fetch_playlist_tracks_open(playlist_ref, limit=limit)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        tracks: List[Dict[str, Any]] = []
+        for idx, track in enumerate(result.get("tracks", [])):
+            spotify_id = track.get("id")
+            if not spotify_id:
+                continue
+
+            raw = track.get("name") or ""
+            artist = track.get("artist") or ""
+            if raw and artist:
+                raw = f"{raw} - {artist}"
+
+            entry = {
+                "raw": raw or spotify_id,
+                "spotify_id": spotify_id,
+                "name": track.get("name"),
+                "artist": artist or None,
+                "album": track.get("album"),
+                "image_url": track.get("image_url"),
+                "uri": f"spotify:track:{spotify_id}",
+                "url": (track.get("external_urls") or {}).get("spotify"),
+                "seed": idx == 0,
+            }
+            tracks.append(entry)
+
+        if not tracks:
+            raise RuntimeError("Playlist does not contain any playable tracks")
+
+        summary = result.get("playlist") or {}
+        summary.setdefault("total_tracks", len(tracks))
+        summary["loaded_tracks"] = len(tracks)
+
+        return tracks, summary
+
     def track_user_interaction(
         self,
         user_id: str,
@@ -297,3 +463,92 @@ class MusicService:
 
         return unique
 
+    @staticmethod
+    def _extract_spotify_id(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+
+        candidate = value.strip()
+        if not candidate:
+            return None
+
+        if candidate.startswith("spotify:track:"):
+            return candidate.split(":")[-1]
+
+        if "open.spotify.com/track/" in candidate:
+            fragment = candidate.split("/track/")[-1]
+            fragment = fragment.split("?")[0].split("#")[0]
+            return fragment or None
+
+        candidate = candidate.split("?")[0].split("#")[0]
+        if len(candidate) == 22 and candidate.replace("-", "").isalnum():
+            return candidate
+
+        return None
+
+    @staticmethod
+    def _split_track_line(raw: str) -> Tuple[Optional[str], Optional[str]]:
+        text = raw.strip()
+        if not text:
+            return None, None
+
+        separators = [
+            " – ",
+            " — ",
+            " - ",
+            " | ",
+            " : ",
+            " by ",
+        ]
+
+        for sep in separators:
+            if sep in text:
+                left, right = text.split(sep, 1)
+                return left.strip() or None, right.strip() or None
+
+        if "-" in text:
+            left, right = text.split("-", 1)
+            return left.strip() or None, right.strip() or None
+
+        return text, None
+
+    def _normalise_playlist_inputs(self, tracks_payload: List[Any]) -> List[Dict[str, Any]]:
+        normalised: List[Dict[str, Any]] = []
+
+        for item in tracks_payload:
+            if isinstance(item, str):
+                descriptor: Dict[str, Any] = {"raw": item}
+            elif isinstance(item, dict):
+                descriptor = {k: v for k, v in item.items()}
+            else:
+                continue
+
+            raw_value = descriptor.get("raw")
+            spotify_id = (
+                descriptor.get("spotify_id")
+                or descriptor.get("id")
+                or self._extract_spotify_id(descriptor.get("uri"))
+                or self._extract_spotify_id(descriptor.get("url"))
+            )
+
+            if not spotify_id and isinstance(raw_value, str):
+                spotify_id = self._extract_spotify_id(raw_value)
+
+            if spotify_id:
+                descriptor["spotify_id"] = spotify_id
+
+            name = descriptor.get("name")
+            artist = descriptor.get("artist")
+
+            if isinstance(raw_value, str):
+                guessed_name, guessed_artist = self._split_track_line(raw_value)
+                name = name or guessed_name
+                artist = artist or guessed_artist
+
+            descriptor["name"] = name
+            descriptor["artist"] = artist
+            descriptor["seed"] = bool(descriptor.get("seed"))
+
+            normalised.append(descriptor)
+
+        return normalised

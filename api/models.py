@@ -78,3 +78,70 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     timestamp: float
+
+
+class PlaylistTrackInput(BaseModel):
+    raw: Optional[str] = None
+    spotify_id: Optional[str] = None
+    uri: Optional[str] = None
+    url: Optional[str] = None
+    name: Optional[str] = None
+    artist: Optional[str] = None
+    seed: bool = False
+    album: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class PlaylistContext(BaseModel):
+    time_of_day: Optional[str] = None
+    moods: Optional[List[str]] = None
+    activities: Optional[List[str]] = None
+    genres: Optional[List[str]] = None
+    energy: Optional[str] = None
+    tempo: Optional[str] = None
+    era: Optional[str] = None
+    regions: Optional[List[str]] = None
+
+
+class PlaylistSummary(BaseModel):
+    playlist_size: int
+    resolved_tracks: int
+
+
+class PlaylistRecommendationsRequest(BaseModel):
+    tracks: List[PlaylistTrackInput]
+    seed: Optional[str] = None
+    limit: int = Field(5, ge=1, le=20)
+    min_popularity: int = Field(0, ge=0, le=100)
+    context: Optional[PlaylistContext] = None
+
+
+class PlaylistRecommendationsResponse(BaseModel):
+    seed: Optional[str]
+    recommendations: List[RecommendationHit]
+    total: int
+    algorithm: str
+    source: str = "playlist"
+    request_id: str
+    processing_time_ms: int
+    playlist: PlaylistSummary
+
+
+class PlaylistImportRequest(BaseModel):
+    url: str
+    limit: Optional[int] = Field(300, ge=1, le=500)
+
+
+class PlaylistImportSummary(BaseModel):
+    id: str
+    name: Optional[str] = None
+    owner: Optional[str] = None
+    total_tracks: int
+    loaded_tracks: int
+    followers: Optional[int] = None
+    image_url: Optional[str] = None
+
+
+class PlaylistImportResponse(BaseModel):
+    tracks: List[PlaylistTrackInput]
+    summary: PlaylistImportSummary

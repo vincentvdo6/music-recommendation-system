@@ -2,11 +2,13 @@
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import random
+import re
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 from cachetools import TTLCache
@@ -37,10 +39,16 @@ class SpotifyClient:
         # Caching with thread-safe TTL cache
         self._search_cache = TTLCache(maxsize=2000, ttl=300)  # 2k searches, 5min
         self._features_cache = TTLCache(maxsize=10000, ttl=7200)  # 10k features, 2hrs
+        self._artist_cache = TTLCache(maxsize=5000, ttl=86400)  # Artist metadata, 24hrs
         self._cache_lock = asyncio.Lock()
 
         # Rate limiting
         self._sem = asyncio.Semaphore(10)
+
+        self._playlist_data_pattern = re.compile(
+            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+            re.S,
+        )
 
     async def start(self):
         """Initialize the HTTP client."""
@@ -255,6 +263,102 @@ class SpotifyClient:
 
         return features_dict
 
+    async def get_artists(self, artist_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch artist metadata (genres, etc.) with caching."""
+        if self.demo_mode or not artist_ids:
+            return {}
+
+        results: Dict[str, Dict[str, Any]] = {}
+        unique: List[str] = []
+
+        for artist_id in artist_ids:
+            if not artist_id:
+                continue
+            cached = await self._cache_get(self._artist_cache, artist_id)
+            if cached is not None:
+                results[artist_id] = cached
+            elif artist_id not in unique:
+                unique.append(artist_id)
+
+        if not unique:
+            return results
+
+        for idx in range(0, len(unique), 50):
+            batch = unique[idx : idx + 50]
+            params = {"ids": ",".join(batch)}
+
+            try:
+                resp = await self._request("GET", "https://api.spotify.com/v1/artists", params=params)
+                resp.raise_for_status()
+            except httpx.HTTPError as exc:
+                logger.warning("Spotify artists lookup failed for batch starting %s (%s)", batch[0], exc)
+                continue
+
+            payload = resp.json()
+            for item in payload.get("artists", []) or []:
+                artist_id = item.get("id")
+                if not artist_id:
+                    continue
+                results[artist_id] = item
+                await self._cache_set(self._artist_cache, artist_id, item)
+
+        return results
+
+    async def get_playlist_tracks(
+        self,
+        playlist_id: str,
+        *,
+        limit: int = 100,
+        max_tracks: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return parsed track entries from a Spotify playlist."""
+        if self.demo_mode:
+            raise RuntimeError("SpotifyClient is in demo mode; playlist tracks unavailable.")
+
+        assert self._client, "Call start() before using the client"
+
+        collected: List[Dict[str, Any]] = []
+        page_size = max(1, min(limit, 100))
+        offset = 0
+
+        while True:
+            params = {
+                "limit": page_size,
+                "offset": offset,
+                "market": "US",
+            }
+
+            resp = await self._request(
+                "GET",
+                f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks",
+                params=params,
+            )
+
+            if resp.status_code == 404:
+                logger.warning("Playlist %s not found or inaccessible", playlist_id)
+                break
+
+            resp.raise_for_status()
+            payload = resp.json()
+
+            for item in payload.get("items", []) or []:
+                track = item.get("track")
+                if not track or track.get("is_local"):
+                    continue
+                parsed = self._parse_spotify_track(track)
+                collected.append(parsed)
+
+                if max_tracks and len(collected) >= max_tracks:
+                    return collected[:max_tracks]
+
+            next_url = payload.get("next")
+            if not next_url:
+                break
+
+            offset += page_size
+
+        return collected
+
     async def get_recommendations(self, seed_tracks: List[str], limit: int = 10) -> List[Dict[str, Any]]:
         """Get recommendations based on seed tracks."""
         if self.demo_mode:
@@ -436,3 +540,331 @@ class SpotifyClient:
             })
 
         return results
+
+    @staticmethod
+    def _extract_playlist_id(reference: str) -> Optional[str]:
+        if not reference:
+            return None
+
+        ref = reference.strip()
+        if not ref:
+            return None
+
+        if ref.startswith("spotify:playlist:"):
+            return ref.split(":")[-1]
+
+        if "open.spotify.com/playlist/" in ref:
+            fragment = ref.split("/playlist/")[-1]
+            fragment = fragment.split("?")[0].split("#")[0]
+            return fragment or None
+
+        ref = ref.split("?")[0].split("#")[0]
+        if len(ref) == 22 and ref.replace("-", "").isalnum():
+            return ref
+
+        return None
+
+    async def fetch_playlist_tracks_open(
+        self,
+        playlist_ref: str,
+        *,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Resolve a Spotify playlist URL/ID to track entries for client-side curation."""
+
+        playlist_id = self._extract_playlist_id(playlist_ref)
+        if not playlist_id:
+            raise ValueError("Invalid Spotify playlist reference")
+
+        html = await self._fetch_open_playlist_html(playlist_id)
+        next_data = self._parse_next_data(html)
+        playlist_payload = self._extract_playlist_payload(next_data)
+
+        if not playlist_payload:
+            raise ValueError("Failed to parse playlist data from Spotify share page")
+
+        tracks = self._build_tracks_from_payload(playlist_payload, limit)
+        metadata = self._build_playlist_metadata(playlist_payload, playlist_id, tracks)
+
+        if not tracks:
+            raise ValueError("Playlist appears to be empty or unsupported")
+
+        return {"playlist": metadata, "tracks": tracks}
+
+    async def _fetch_open_playlist_html(self, playlist_id: str) -> str:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://open.spotify.com/",
+        }
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+            resp = await client.get(
+                f"https://open.spotify.com/embed/playlist/{playlist_id}",
+                headers=headers,
+            )
+
+        if resp.status_code == 404:
+            raise ValueError("Playlist not found or not publicly accessible")
+
+        resp.raise_for_status()
+        return resp.text
+
+    def _parse_next_data(self, html: str) -> Dict[str, Any]:
+        match = self._playlist_data_pattern.search(html)
+        if not match:
+            raise ValueError("Unable to locate Spotify playlist JSON payload")
+
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError as exc:  # pragma: no cover - depends on external payload
+            raise ValueError("Spotify playlist payload is malformed") from exc
+
+    @staticmethod
+    def _extract_playlist_payload(next_data: Dict[str, Any]) -> Dict[str, Any]:
+        props = next_data.get("props") or {}
+        page_props = props.get("pageProps") or {}
+
+        state = page_props.get("state") or {}
+        entity = state.get("data", {}).get("entity")
+        if isinstance(entity, dict) and entity:
+            return entity
+
+        candidates = [
+            page_props.get("playlist"),
+            page_props.get("page"),
+            page_props.get("data"),
+            page_props.get("layout", {}).get("playlistPage", {}).get("data"),
+        ]
+
+        for candidate in candidates:
+            if isinstance(candidate, dict) and candidate:
+                return candidate
+
+        return {}
+
+    def _build_tracks_from_payload(self, payload: Dict[str, Any], limit: Optional[int]) -> List[Dict[str, Any]]:
+        sections = [
+            payload.get("tracks"),
+            payload.get("trackList"),
+            payload.get("items"),
+        ]
+
+        items = []
+        for section in sections:
+            if isinstance(section, dict) and isinstance(section.get("items"), list):
+                items = section.get("items")
+                break
+            if isinstance(section, list):
+                items = section
+                break
+
+        tracks: List[Dict[str, Any]] = []
+        if not isinstance(items, list):
+            return tracks
+
+        for item in items:
+            if limit is not None and len(tracks) >= limit:
+                break
+
+            parsed = self._parse_playlist_item(item)
+            if parsed:
+                tracks.append(parsed)
+
+        return tracks
+
+    def _parse_playlist_item(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(item, dict):
+            return None
+
+        container = item
+        track_candidate = item.get("track")
+        if isinstance(track_candidate, dict):
+            track = track_candidate
+        else:
+            inner = item.get("item")
+            if isinstance(inner, dict):
+                nested_track = inner.get("track")
+                if isinstance(nested_track, dict):
+                    track = nested_track
+                    container = inner
+                elif inner.get("entityType") == "track":
+                    track = inner
+                    container = inner
+                else:
+                    track = None
+            else:
+                track = None
+
+        if not isinstance(track, dict):
+            if item.get("entityType") == "track" or item.get("uri"):
+                track = item
+                container = item
+            else:
+                return None
+
+        uri_value = track.get("uri") or container.get("uri") or track.get("uid") or container.get("uid")
+        track_id = None
+        if isinstance(uri_value, str) and uri_value.startswith("spotify:track:"):
+            track_id = uri_value.split(":")[-1]
+        elif isinstance(track.get("id"), str):
+            track_id = track["id"]
+
+        if not track_id:
+            return None
+
+        name = track.get("name") or track.get("title") or container.get("title") or ""
+
+        album_info = track.get("album") if isinstance(track.get("album"), dict) else {}
+        album_name = album_info.get("name") or album_info.get("title") or ""
+
+        cover_sources = album_info.get("coverArt", {}).get("sources") if isinstance(album_info, dict) else None
+        image_url = None
+        if isinstance(cover_sources, list) and cover_sources:
+            image_url = cover_sources[0].get("url")
+        else:
+            images = album_info.get("images") if isinstance(album_info, dict) else None
+            if isinstance(images, list) and images:
+                image_url = images[0].get("url")
+
+        duration_ms = track.get("duration_ms") or track.get("durationMs")
+        if not duration_ms:
+            duration_field = track.get("duration")
+            if isinstance(duration_field, dict):
+                duration_ms = duration_field.get("totalMilliseconds")
+            elif isinstance(duration_field, (int, float)):
+                duration_ms = duration_field
+        if not duration_ms:
+            duration_field = container.get("duration")
+            if isinstance(duration_field, dict):
+                duration_ms = duration_field.get("totalMilliseconds")
+            elif isinstance(duration_field, (int, float)):
+                duration_ms = duration_field
+        if not duration_ms:
+            duration_ms = 0
+
+        release_date = ""
+        date_info = album_info.get("date") if isinstance(album_info, dict) else None
+        if isinstance(date_info, dict) and date_info.get("year"):
+            year = date_info.get("year")
+            month = date_info.get("month") or 1
+            day = date_info.get("day") or 1
+            try:
+                release_date = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                release_date = str(year)
+
+        artist_name = ""
+        artist_ids: List[str] = []
+        artists_field = track.get("artists")
+        if isinstance(artists_field, dict):
+            items = artists_field.get("items")
+            if isinstance(items, list):
+                for artist in items:
+                    if not isinstance(artist, dict):
+                        continue
+                    artist_name = artist_name or artist.get("profile", {}).get("name") or artist.get("name")
+                    uri = artist.get("uri")
+                    if isinstance(uri, str) and uri.startswith("spotify:artist:"):
+                        artist_ids.append(uri.split(":")[-1])
+        elif isinstance(artists_field, list):
+            for artist in artists_field:
+                if not isinstance(artist, dict):
+                    continue
+                artist_name = artist_name or artist.get("name") or artist.get("profile", {}).get("name")
+                uri = artist.get("uri")
+                if isinstance(uri, str) and uri.startswith("spotify:artist:"):
+                    artist_ids.append(uri.split(":")[-1])
+
+        if not artist_name:
+            artist_name = track.get("artist") or track.get("subtitle") or container.get("subtitle") or ""
+
+        album_uri = album_info.get("uri") if isinstance(album_info, dict) else None
+        album_id = None
+        if isinstance(album_uri, str) and album_uri.startswith("spotify:album:"):
+            album_id = album_uri.split(":")[-1]
+
+        metadata: Dict[str, Any] = {}
+        if album_id:
+            metadata["spotify_album_id"] = album_id
+        if artist_ids:
+            metadata["spotify_artist_ids"] = artist_ids
+
+        preview_url = track.get("preview_url") or track.get("previewUrl")
+        if not preview_url and isinstance(track.get("audioPreview"), dict):
+            preview_url = track["audioPreview"].get("url")
+
+        external_urls = {"spotify": f"https://open.spotify.com/track/{track_id}"}
+
+        return {
+            "id": track_id,
+            "provider": "spotify",
+            "name": name,
+            "artist": artist_name,
+            "album": album_name,
+            "duration_ms": int(duration_ms) if isinstance(duration_ms, (int, float)) else 0,
+            "popularity": track.get("popularity", 0) or 0,
+            "preview_url": preview_url or "",
+            "external_urls": external_urls,
+            "uri": f"spotify:track:{track_id}",
+            "release_date": release_date,
+            "image_url": image_url or "",
+            "metadata": {k: v for k, v in metadata.items() if v},
+        }
+
+    @staticmethod
+    def _build_playlist_metadata(
+        playlist_payload: Dict[str, Any],
+        playlist_id: str,
+        tracks: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        owner = playlist_payload.get("owner") or {}
+        if isinstance(owner, dict):
+            owner_name = owner.get("displayName") or owner.get("name") or owner.get("username")
+        else:
+            owner_name = None
+
+        if not owner_name:
+            owner_name = playlist_payload.get("subtitle") or ""
+
+        track_list = playlist_payload.get("trackList")
+        track_list_count = None
+        if isinstance(track_list, dict):
+            track_list_count = track_list.get("totalCount")
+        elif isinstance(track_list, list):
+            track_list_count = len(track_list)
+
+        total = (
+            playlist_payload.get("tracks", {}).get("totalCount")
+            or playlist_payload.get("totalTracks")
+            or playlist_payload.get("tracks", {}).get("total")
+            or track_list_count
+            or len(tracks)
+        )
+
+        images = playlist_payload.get("images")
+        cover_art = playlist_payload.get("coverArt", {}).get("sources")
+        image_url = None
+        if isinstance(cover_art, list) and cover_art:
+            image_url = cover_art[0].get("url")
+        elif isinstance(images, list) and images:
+            image_url = images[0].get("url")
+
+        followers = None
+        followers_data = playlist_payload.get("followers")
+        if isinstance(followers_data, dict):
+            followers = followers_data.get("totalCount") or followers_data.get("total")
+
+        return {
+            "id": playlist_id,
+            "name": playlist_payload.get("name") or playlist_payload.get("title") or "",
+            "owner": owner_name or "",
+            "total_tracks": int(total) if isinstance(total, (int, float)) else len(tracks),
+            "image_url": image_url or "",
+            "followers": int(followers) if isinstance(followers, (int, float)) else None,
+        }
+
+
+
+
+

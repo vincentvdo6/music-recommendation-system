@@ -16,6 +16,12 @@ from api.models import (
     AudioFeatures,
     RecommendationsResponse,
     RecommendationHit,
+    PlaylistRecommendationsRequest,
+    PlaylistRecommendationsResponse,
+    PlaylistSummary,
+    PlaylistImportRequest,
+    PlaylistImportResponse,
+    PlaylistTrackInput,
 )
 from services.spotify.client import SpotifyClient
 
@@ -320,3 +326,129 @@ async def track_interaction(
         "track_id": track_id,
         "interaction": interaction,
     }
+
+
+@router.post("/playlist/recommendations", response_model=PlaylistRecommendationsResponse)
+@limiter.limit("10/minute")
+async def playlist_recommendations(
+    request: Request,
+    payload: PlaylistRecommendationsRequest,
+):
+    """Generate recommendations using a user-supplied playlist as the catalogue."""
+
+    start_time = time.time()
+    request_id = getattr(request.state, "request_id", "unknown")
+
+    music_service = request.app.state.music
+    spotify_client: Optional[SpotifyClient] = getattr(request.app.state, "spotify", None)
+
+    context: Dict[str, Any] = {}
+    ctx = payload.context
+    if ctx:
+        if ctx.time_of_day:
+            context["time_of_day"] = ctx.time_of_day
+        if ctx.moods:
+            context["moods"] = ctx.moods
+        if ctx.activities:
+            context["activities"] = ctx.activities
+        if ctx.genres:
+            context["genres"] = ctx.genres
+        if ctx.energy:
+            context["energy_level"] = ctx.energy
+        if ctx.tempo is not None:
+            context["tempo"] = ctx.tempo
+        if ctx.era:
+            context["era"] = ctx.era
+        if ctx.regions:
+            context["regions"] = ctx.regions
+
+    try:
+        playlist_tracks = [track.dict(exclude_none=True) for track in payload.tracks]
+        recommendations_data, source, playlist_info = await music_service.recommend_from_playlist(
+            playlist_tracks,
+            seed=payload.seed,
+            limit=payload.limit,
+            context=context or None,
+            min_popularity=payload.min_popularity,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    enhanced_recommendations: List[RecommendationHit] = []
+    for track_dict in recommendations_data:
+        components = (track_dict.get("recommendation") or {}).get("components", {})
+        similarity_score = components.get("similarity", 0.75)
+        rank_score = (track_dict.get("recommendation") or {}).get("score", similarity_score)
+
+        feature_payload = track_dict.get("audio_features") or {}
+        audio_features: Optional[AudioFeatures] = (
+            AudioFeatures(**feature_payload) if feature_payload else None
+        )
+
+        top_factors = []
+        if components:
+            top_factors.append(
+                f"Audio similarity {int(components.get('similarity', 0) * 100)}%"
+            )
+            top_factors.append(
+                f"Context alignment {int(components.get('context', 0) * 100)}%"
+            )
+        tags = track_dict.get("tags", {})
+        if tags.get("activities"):
+            top_factors.append(f"Activity match: {', '.join(tags['activities'][:2])}")
+
+        explanation_dict = {
+            "top_factors": top_factors[:3],
+            "similarity_reason": "Contextual playlist engine",
+            "ranking_boost": f"Popularity score {track_dict.get('popularity', 0)}%",
+        }
+
+        enhanced_payload = dict(track_dict)
+        enhanced_payload.update(
+            {
+                "audio_features": audio_features,
+                "similarity_score": similarity_score,
+                "rank_score": rank_score,
+                "explanation": explanation_dict,
+            }
+        )
+
+        enhanced_recommendations.append(RecommendationHit(**enhanced_payload))
+
+    processing_time = int((time.time() - start_time) * 1000)
+    playlist_summary = PlaylistSummary(**playlist_info)
+
+    return PlaylistRecommendationsResponse(
+        seed=payload.seed,
+        recommendations=enhanced_recommendations,
+        total=len(enhanced_recommendations),
+        algorithm="Contextual (User Playlist)",
+        source=source,
+        request_id=request_id,
+        processing_time_ms=processing_time,
+        playlist=playlist_summary,
+    )
+
+
+@router.post("/playlist/import", response_model=PlaylistImportResponse)
+@limiter.limit("20/minute")
+async def import_playlist(
+    request: Request,
+    payload: PlaylistImportRequest,
+):
+    """Resolve a Spotify playlist URL/ID to track entries for client-side curation."""
+
+    music_service = request.app.state.music
+
+    try:
+        tracks, summary = await music_service.import_playlist_from_url(
+            payload.url,
+            limit=payload.limit if payload.limit is not None else 300,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return PlaylistImportResponse(
+        tracks=[PlaylistTrackInput(**track) for track in tracks],
+        summary=summary,
+    )

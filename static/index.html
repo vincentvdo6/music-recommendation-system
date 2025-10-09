@@ -164,6 +164,49 @@
       box-shadow: var(--shadow-lg);
     }
 
+    .playlist-card {
+      gap: var(--gap-4);
+    }
+
+    .drop-zone {
+      border: 1px dashed rgba(255,255,255,0.18);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--text-muted);
+      background: rgba(12,12,16,0.6);
+      transition: border-color 0.2s ease, background 0.2s ease;
+      cursor: pointer;
+    }
+
+    .drop-zone.drag-active {
+      border-color: var(--primary);
+      background: rgba(99,102,241,0.12);
+      color: var(--text-primary);
+    }
+
+    .playlist-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--gap-3);
+    }
+
+    .playlist-import {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--gap-3);
+      align-items: center;
+    }
+
+    .playlist-import .input {
+      flex: 1 1 260px;
+    }
+
+    .playlist-summary {
+      font-size: 0.875rem;
+      color: var(--text-soft);
+    }
+
     .bg-base-200 {
       background: var(--base-200);
     }
@@ -466,20 +509,28 @@
     }
 
     .album-art {
-      width: min(280px, 100%);
-      aspect-ratio: 1 / 1;
+      width: 100%;
+      max-width: 280px;
+      position: relative;
       border-radius: var(--radius-lg);
       overflow: hidden;
       background: var(--base-300);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+    }
+
+    .album-art::before {
+      content: "";
+      display: block;
+      padding-top: 100%;
     }
 
     .album-art img {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
+      display: block;
     }
 
     .nav-buttons {
@@ -737,6 +788,41 @@
 
   <!-- Main -->
   <main class="main">
+    <section class="card bg-base-200 shadow-lg playlist-card">
+      <div class="title-group">
+        <h2 class="text-2xl font-bold">Bring your own playlist</h2>
+        <p>
+          Drop a list of tracks (Spotify links or <code>Song - Artist</code> lines) and well
+          recommend the next song using only your playlist as the catalogue.
+        </p>
+      </div>
+
+      <div class="drop-zone" id="playlistDropZone">
+        <input type="file" id="playlistFileInput" accept=".txt,.csv,.json" hidden />
+        <p><strong>Drag & drop</strong> a text/CSV export, or click to browse.</p>
+        <p class="text-sm">You can also paste straight from Spotify: copy the track list and drop it here.</p>
+      </div>
+
+      <div class="playlist-import">
+        <input
+          type="text"
+          id="playlistUrlInput"
+          class="input input-lg"
+          placeholder="Paste a Spotify playlist link…"
+          autocomplete="off"
+        />
+        <button type="button" class="btn btn-primary btn-sm" id="playlistImportBtn">Import playlist link</button>
+      </div>
+
+      <div class="playlist-actions">
+        <button type="button" class="btn btn-outline btn-sm" id="playlistPasteBtn">Paste tracks</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="playlistClearBtn" disabled>Clear</button>
+        <button type="button" class="btn btn-primary btn-sm" id="playlistRecommendBtn" disabled>Recommend from playlist</button>
+      </div>
+
+      <div class="playlist-summary" id="playlistSummary">No playlist loaded yet.</div>
+    </section>
+
     <section class="card bg-base-200 shadow-lg input-card">
       <div class="title-group">
         <h1 class="text-3xl font-bold">One input. One recommendation.</h1>
@@ -924,6 +1010,15 @@
     const CACHE_TTL_MS = 60 * 1000;
 
     // Elements
+    const playlistDropZone = document.getElementById('playlistDropZone');
+    const playlistFileInput = document.getElementById('playlistFileInput');
+    const playlistPasteBtn = document.getElementById('playlistPasteBtn');
+    const playlistClearBtn = document.getElementById('playlistClearBtn');
+    const playlistRecommendBtn = document.getElementById('playlistRecommendBtn');
+    const playlistSummary = document.getElementById('playlistSummary');
+    const playlistUrlInput = document.getElementById('playlistUrlInput');
+    const playlistImportBtn = document.getElementById('playlistImportBtn');
+
     const songInput = document.getElementById('songInput');
     const searchBtn = document.getElementById('searchBtn');
     const searchForm = document.getElementById('searchForm');
@@ -954,6 +1049,180 @@
         clearTimeout(debounceTimeout);
         debounceTimeout = setTimeout(() => fn.apply(this, args), ms);
       };
+    }
+
+    function extractSpotifyId(value) {
+      if (!value) return null;
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith('spotify:track:')) {
+        return trimmed.split(':').pop();
+      }
+      const match = trimmed.match(/open\.spotify\.com\/track\/([A-Za-z0-9]+)/);
+      if (match) {
+        return match[1];
+      }
+      if (/^[A-Za-z0-9]{22}$/.test(trimmed)) {
+        return trimmed;
+      }
+      return null;
+    }
+
+    function splitTrackLine(line) {
+      const text = (line || '').trim();
+      if (!text) return { name: null, artist: null };
+      const separators = [' – ', ' — ', ' - ', ' | ', ' : ', ' by '];
+      for (const sep of separators) {
+        if (text.includes(sep)) {
+          const index = text.indexOf(sep);
+          const left = text.slice(0, index);
+          const right = text.slice(index + sep.length);
+          return { name: left.trim() || null, artist: right.trim() || null };
+        }
+      }
+      if (text.includes('-')) {
+        const index = text.indexOf('-');
+        const left = text.slice(0, index);
+        const right = text.slice(index + 1);
+        return { name: left.trim() || null, artist: right.trim() || null };
+      }
+      return { name: text || null, artist: null };
+    }
+
+    function parsePlaylistText(text) {
+      if (!text) return [];
+      const lines = text.split(/\r?\n/);
+      const entries = [];
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const spotifyId = extractSpotifyId(line);
+        if (spotifyId) {
+          entries.push({ raw: line, spotify_id: spotifyId });
+          continue;
+        }
+        const { name, artist } = splitTrackLine(line);
+        if (!name && !artist) continue;
+        const entry = { raw: line };
+        if (name) entry.name = name;
+        if (artist) entry.artist = artist;
+        entries.push(entry);
+      }
+      return entries;
+    }
+
+    function normalisePlaylistEntries(entries) {
+      const deduped = [];
+      const seen = new Set();
+      for (const entry of entries) {
+        const key = entry.spotify_id
+          ? `id:${entry.spotify_id}`
+          : `meta:${(entry.name || '').toLowerCase()}|${(entry.artist || '').toLowerCase()}|${entry.raw || ''}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        deduped.push({ ...entry, seed: !!entry.seed });
+      }
+      return deduped;
+    }
+
+    let playlistEntries = [];
+    let lastPlaylistSummary = null;
+
+    function updatePlaylistSummary(message) {
+      if (message) {
+        playlistSummary.textContent = message;
+      } else if (!playlistEntries.length) {
+        if (lastPlaylistSummary && lastPlaylistSummary.name) {
+          playlistSummary.textContent = `${lastPlaylistSummary.name} • No tracks loaded yet.`;
+        } else {
+          playlistSummary.textContent = 'No playlist loaded yet.';
+        }
+      } else {
+        const withIds = playlistEntries.filter(entry => entry.spotify_id).length;
+        const prefix = lastPlaylistSummary && lastPlaylistSummary.name ? `${lastPlaylistSummary.name} • ` : '';
+        playlistSummary.textContent = `${prefix}${playlistEntries.length} tracks ready (${withIds} with Spotify IDs).`;
+      }
+
+      const hasEntries = playlistEntries.length > 0;
+      playlistRecommendBtn.disabled = !hasEntries;
+      playlistClearBtn.disabled = !hasEntries;
+    }
+
+    function loadPlaylistFromText(text) {
+      const parsed = normalisePlaylistEntries(parsePlaylistText(text));
+      if (!parsed.length) {
+        playlistEntries = [];
+        lastPlaylistSummary = null;
+        updatePlaylistSummary('Could not parse any tracks. Provide Spotify links or "Song - Artist" lines.');
+        return;
+      }
+      playlistEntries = parsed.map((entry, index) => ({ ...entry, seed: index === 0 }));
+      lastPlaylistSummary = null;
+      updatePlaylistSummary();
+    }
+
+    function handlePlaylistFileInput(fileList) {
+      if (!fileList || !fileList.length) return;
+      const file = fileList[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        loadPlaylistFromText(event.target?.result || '');
+        playlistFileInput.value = '';
+      };
+      reader.readAsText(file);
+      lastPlaylistSummary = null;
+    }
+
+    async function importPlaylistFromUrl() {
+      const url = (playlistUrlInput?.value || '').trim();
+      if (!url) {
+        updatePlaylistSummary('Paste a Spotify playlist link first.');
+        return;
+      }
+
+      playlistImportBtn.disabled = true;
+      playlistImportBtn.textContent = 'Importing…';
+      updatePlaylistSummary('Importing playlist…');
+
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/playlist/import`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ url })
+        });
+
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const importedTracks = Array.isArray(data.tracks) ? data.tracks : [];
+
+        playlistEntries = normalisePlaylistEntries(importedTracks).map((entry, index) => ({
+          ...entry,
+          seed: index === 0
+        }));
+
+        lastPlaylistSummary = data.summary || null;
+
+        if (!playlistEntries.length) {
+          updatePlaylistSummary('Playlist did not include any tracks we can use.');
+        } else {
+          updatePlaylistSummary();
+        }
+      } catch (error) {
+        console.error('Playlist import failed:', error);
+        updatePlaylistSummary('Failed to import playlist link. Make sure it is public and try again.');
+      } finally {
+        playlistImportBtn.disabled = false;
+        playlistImportBtn.textContent = 'Import playlist link';
+      }
     }
 
     function getCachedResult(key) {
@@ -1294,6 +1563,75 @@
     let allRecommendations = [];
     let currentRecIndex = 0;
 
+    // Playlist interactions
+    updatePlaylistSummary();
+
+    playlistDropZone.addEventListener('click', () => playlistFileInput.click());
+
+    playlistDropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      playlistDropZone.classList.add('drag-active');
+    });
+
+    playlistDropZone.addEventListener('dragenter', (event) => {
+      event.preventDefault();
+      playlistDropZone.classList.add('drag-active');
+    });
+
+    playlistDropZone.addEventListener('dragleave', (event) => {
+      if (event.target === playlistDropZone) {
+        playlistDropZone.classList.remove('drag-active');
+      }
+    });
+
+    playlistDropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      playlistDropZone.classList.remove('drag-active');
+      if (event.dataTransfer?.files?.length) {
+        handlePlaylistFileInput(event.dataTransfer.files);
+      } else {
+        const text = event.dataTransfer?.getData('text/plain');
+        if (text) {
+          loadPlaylistFromText(text);
+        }
+      }
+    });
+
+    playlistFileInput.addEventListener('change', (event) => {
+      handlePlaylistFileInput(event.target?.files || []);
+    });
+
+    playlistPasteBtn.addEventListener('click', () => {
+      const pasted = window.prompt('Paste track lines or Spotify links:');
+      if (pasted) {
+        loadPlaylistFromText(pasted);
+      }
+    });
+
+    playlistClearBtn.addEventListener('click', () => {
+      playlistEntries = [];
+      lastPlaylistSummary = null;
+      if (playlistUrlInput) {
+        playlistUrlInput.value = '';
+      }
+      updatePlaylistSummary();
+    });
+
+    playlistRecommendBtn.addEventListener('click', requestPlaylistRecommendation);
+
+    if (playlistImportBtn) {
+      playlistImportBtn.addEventListener('click', importPlaylistFromUrl);
+    }
+
+    if (playlistUrlInput) {
+      playlistUrlInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          importPlaylistFromUrl();
+        }
+      });
+    }
+
     async function handleRecommendation(inputTrack) {
       try {
         hideSuggestions();
@@ -1393,6 +1731,63 @@
       }
     }
 
+    async function requestPlaylistRecommendation() {
+      if (!playlistEntries.length) return;
+
+      const payload = {
+        tracks: playlistEntries.map(entry => ({ ...entry })),
+        limit: 10,
+        context: { time_of_day: getTimeOfDay() },
+        min_popularity: 0
+      };
+
+      playlistRecommendBtn.disabled = true;
+      playlistRecommendBtn.textContent = 'Analysing…';
+      updatePlaylistSummary(`Analysing ${playlistEntries.length} tracks…`);
+
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/playlist/recommendations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.recommendations || !data.recommendations.length) {
+          throw new Error('No recommendations returned');
+        }
+
+        allRecommendations = data.recommendations;
+        currentRecIndex = 0;
+        lastPlaylistSummary = data.playlist || null;
+        const playlistLabel = lastPlaylistSummary?.name || 'Playlist';
+        const analysedCount = lastPlaylistSummary?.loaded_tracks ?? playlistEntries.length;
+        inputSummary.textContent = `${playlistLabel} • ${analysedCount} tracks analysed`;
+        renderRecommendation(allRecommendations[currentRecIndex]);
+
+        updatePlaylistSummary();
+
+        resultSection.classList.remove('hidden');
+        resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      } catch (error) {
+        console.error('Playlist recommendation failed:', error);
+        alert('Could not analyse the playlist. Please check the format and try again.');
+        updatePlaylistSummary('Playlist analysis failed. Adjust the input and retry.');
+      } finally {
+        playlistRecommendBtn.textContent = 'Recommend from playlist';
+        playlistRecommendBtn.disabled = playlistEntries.length === 0;
+      }
+    }
+
     function renderRecommendation(recommendation) {
       recTitle.textContent = recommendation.name;
       recArtist.textContent = recommendation.artist;
@@ -1478,3 +1873,10 @@
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
