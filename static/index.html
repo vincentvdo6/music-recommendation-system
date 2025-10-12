@@ -196,6 +196,7 @@
       color: var(--text-muted);
       font-size: 0.95rem;
       min-width: 220px;
+      flex: 1 1 220px;
       transition: background var(--transition), color var(--transition);
     }
 
@@ -1262,6 +1263,10 @@
 
         lastPlaylistSummary = data.summary || null;
 
+        if (playlistUrlInput) {
+          playlistUrlInput.value = url;
+        }
+
         if (!playlistEntries.length) {
           updatePlaylistSummary('Playlist did not include any tracks we can use.');
         } else {
@@ -1588,6 +1593,10 @@
     async function performSearch() {
       const query = songInput.value.trim();
       if (!query) return;
+      if (!playlistEntries.length) {
+        alert('Import a playlist first so we can tailor the recommendation.');
+        return;
+      }
 
       try {
         searchBtn.textContent = 'Finding…';
@@ -1634,7 +1643,6 @@
 
     async function handleRecommendation(inputTrack) {
       if (!playlistEntries.length) {
-        alert('Import a playlist first so we can personalise the recommendation.');
         return;
       }
 

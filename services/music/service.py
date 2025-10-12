@@ -178,6 +178,28 @@ class MusicService:
         for track in tracks_map.values():
             artist_ids.extend(track.get("metadata", {}).get("spotify_artist_ids", []))
 
+        if not tracks_map:
+            # Use normalised inputs as a fallback source of metadata
+            for item in normalised_inputs:
+                spotify_id = item.get("spotify_id")
+                if not spotify_id:
+                    continue
+                tracks_map.setdefault(
+                    spotify_id,
+                    {
+                        "id": spotify_id,
+                        "name": item.get("name", ""),
+                        "artist": item.get("artist", ""),
+                        "album": item.get("album", ""),
+                        "duration_ms": item.get("duration_ms") or 0,
+                        "popularity": item.get("popularity") or 50,
+                        "preview_url": item.get("preview_url"),
+                        "image_url": item.get("image_url"),
+                        "external_urls": item.get("external_urls", {}),
+                        "metadata": item.get("metadata", {}),
+                    },
+                )
+
         artist_map = await self.spotify.get_artists(artist_ids)
 
         entries = build_entries(
@@ -187,30 +209,51 @@ class MusicService:
             min_popularity=min_popularity,
         )
 
-        # Fallback: enrich with curated catalogue matches when Spotify features are missing
-        if self.context_engine and self.catalogue:
-            seen_ids: set[str] = {entry["id"] for entry in entries}
-            for item in normalised_inputs:
-                candidate = None
-                spotify_id = item.get("spotify_id")
-                if spotify_id:
-                    candidate = self.catalogue.get_by_id(spotify_id)
-                if not candidate:
-                    candidate = self.catalogue.find_best_match(item.get("name"), item.get("artist"))
-                if candidate and candidate["id"] not in seen_ids:
-                    entries.append(candidate)
-                    seen_ids.add(candidate["id"])
-                    tracks_map.setdefault(candidate["id"], candidate)
-
         if not entries:
+            fallback_recommendations = await self._apple_playlist_fallback(
+                normalised_inputs,
+                limit=limit,
+            )
+
+            if fallback_recommendations:
+                fallback_recommendations = await self._ensure_media_assets(fallback_recommendations)
+                playlist_info = self._build_playlist_info(
+                    total_tracks=len(normalised_inputs),
+                    resolved_tracks=len(tracks_map) or len(normalised_inputs),
+                    profile_context=None,
+                )
+                return fallback_recommendations, "apple-playlist", playlist_info
+
             raise RuntimeError(
                 "Playlist tracks were filtered out (missing features or below popularity threshold)"
             )
 
-        if not self.context_engine:
-            raise RuntimeError("Curated engine unavailable; cannot personalise recommendations")
+        resolved_count = len(tracks_map) or len(entries)
+        user_profile = self.context_engine.build_user_profile(entries) if self.context_engine else None
+        profile_context = user_profile.get("context", {}) if user_profile else None
+        playlist_info = self._build_playlist_info(
+            total_tracks=len(entries),
+            resolved_tracks=resolved_count,
+            profile_context=profile_context,
+        )
 
-        user_profile = self.context_engine.build_user_profile(entries)
+        prefer_apple = (self.spotify and self.spotify.demo_mode) or not self.context_engine
+        if prefer_apple:
+            fallback_recommendations = await self._apple_playlist_fallback(normalised_inputs, limit=limit)
+            if fallback_recommendations:
+                fallback_recommendations = await self._ensure_media_assets(fallback_recommendations)
+                return fallback_recommendations, "apple-playlist", playlist_info
+            if not self.context_engine:
+                raise RuntimeError("Curated engine unavailable; cannot personalise recommendations")
+
+        if not user_profile:
+            user_profile = self.context_engine.build_user_profile(entries)
+            profile_context = user_profile.get("context", {})
+            playlist_info = self._build_playlist_info(
+                total_tracks=len(entries),
+                resolved_tracks=resolved_count,
+                profile_context=profile_context,
+            )
 
         seed_id = self._extract_spotify_id(seed) if seed else None
         if not seed_id:
@@ -238,20 +281,13 @@ class MusicService:
         # Re-enrich recommendations with Spotify/Apple assets if available
         recommendations = await self._ensure_media_assets(recommendations)
 
-        profile_context = user_profile.get("context", {})
-        resolved_count = len(tracks_map) or len(entries)
-        playlist_info = {
-            "playlist_size": len(entries),
-            "resolved_tracks": resolved_count,
-            "top_moods": profile_context.get("moods", [])[:3],
-            "top_activities": profile_context.get("activities", [])[:3],
-            "top_genres": profile_context.get("genres", [])[:5],
-            "regions": profile_context.get("regions", [])[:3],
-            "time_of_day": profile_context.get("time_of_day"),
-            "energy_level": profile_context.get("energy_level"),
-            "tempo": profile_context.get("tempo"),
-            "era": profile_context.get("era"),
-        }
+        if recommendations:
+            return recommendations, "playlist", playlist_info
+
+        fallback_recommendations = await self._apple_playlist_fallback(normalised_inputs, limit=limit)
+        if fallback_recommendations:
+            fallback_recommendations = await self._ensure_media_assets(fallback_recommendations)
+            return fallback_recommendations, "apple-playlist", playlist_info
 
         return recommendations, "playlist", playlist_info
 
@@ -335,6 +371,128 @@ class MusicService:
         if tasks:
             await asyncio.gather(*tasks)
         return tracks
+
+    def _build_playlist_info(
+        self,
+        *,
+        total_tracks: int,
+        resolved_tracks: int,
+        profile_context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        info = {
+            "playlist_size": total_tracks,
+            "resolved_tracks": resolved_tracks,
+            "top_moods": [],
+            "top_activities": [],
+            "top_genres": [],
+            "regions": [],
+            "time_of_day": None,
+            "energy_level": None,
+            "tempo": None,
+            "era": None,
+        }
+
+        if profile_context:
+            info["top_moods"] = (profile_context.get("moods") or [])[:3]
+            info["top_activities"] = (profile_context.get("activities") or [])[:3]
+            info["top_genres"] = (profile_context.get("genres") or [])[:5]
+            info["regions"] = (profile_context.get("regions") or [])[:3]
+            info["time_of_day"] = profile_context.get("time_of_day")
+            info["energy_level"] = profile_context.get("energy_level")
+            info["tempo"] = profile_context.get("tempo")
+            info["era"] = profile_context.get("era")
+
+        return info
+
+    async def _apple_playlist_fallback(
+        self,
+        playlist_inputs: List[Dict[str, Any]],
+        *,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        if not self.apple or not playlist_inputs:
+            return []
+
+        limit = max(1, limit)
+        playlist_keys: set[Tuple[str, str]] = set()
+        for item in playlist_inputs:
+            name = (item.get("name") or "").casefold()
+            artist = (item.get("artist") or "").casefold()
+            if name:
+                playlist_keys.add((name, artist))
+
+        seen_tracks: set[str] = set()
+        seen_pairs: set[Tuple[str, str]] = set()
+        recommendations: List[Dict[str, Any]] = []
+
+        unique_artists: List[str] = []
+        seen_artists: set[str] = set()
+        for item in playlist_inputs:
+            artist = item.get("artist")
+            if artist:
+                key = artist.casefold()
+                if key not in seen_artists:
+                    seen_artists.add(key)
+                    unique_artists.append(artist)
+
+        for item in playlist_inputs:
+            track_name = item.get("name")
+            artist_name = item.get("artist")
+            if not track_name and not artist_name:
+                continue
+
+            candidates = await self.apple.get_related_tracks(
+                track_name=track_name,
+                artist_name=artist_name,
+                limit=min(limit * 2, 12),
+                exclude_ids=seen_tracks,
+            )
+
+            for candidate in candidates:
+                candidate_id = str(candidate.get("id"))
+                pair = (
+                    (candidate.get("name") or "").casefold(),
+                    (candidate.get("artist") or "").casefold(),
+                )
+
+                if not pair[0]:
+                    continue
+                if pair in playlist_keys or pair in seen_pairs:
+                    continue
+                if candidate_id in seen_tracks:
+                    continue
+
+                seen_tracks.add(candidate_id)
+                seen_pairs.add(pair)
+                recommendations.append(candidate)
+
+                if len(recommendations) >= limit:
+                    return recommendations[:limit]
+
+        for artist in unique_artists:
+            candidates = await self.apple.search_tracks(f"{artist} essentials", limit=min(limit * 2, 20))
+            for candidate in candidates:
+                candidate_id = str(candidate.get("id"))
+                pair = (
+                    (candidate.get("name") or "").casefold(),
+                    (candidate.get("artist") or "").casefold(),
+                )
+
+                if not pair[0]:
+                    continue
+                if pair in playlist_keys or pair in seen_pairs:
+                    continue
+                if candidate_id in seen_tracks:
+                    continue
+
+                seen_tracks.add(candidate_id)
+                seen_pairs.add(pair)
+                recommendations.append(candidate)
+
+                if len(recommendations) >= limit:
+                    return recommendations[:limit]
+
+        return recommendations[:limit]
 
     @staticmethod
     def _parse_seed(seed: str) -> Tuple[str, str]:
