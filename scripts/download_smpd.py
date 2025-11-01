@@ -56,6 +56,32 @@ class SMPDProcessor:
         logger.info(f"Loaded {len(all_playlists):,} playlists")
         return all_playlists
 
+    @staticmethod
+    def _normalise_track_id(track: Dict) -> str:
+        """
+        Convert any Spotify track identifier to the canonical 22-character ID.
+
+        Handles values in the SMPD format (`spotify:track:...`) as well as raw IDs.
+        """
+        raw_values = [
+            track.get("track_uri"),
+            track.get("uri"),
+            track.get("track_id"),
+        ]
+
+        for value in raw_values:
+            if not value:
+                continue
+            candidate = str(value).strip()
+            if not candidate:
+                continue
+            if candidate.startswith("spotify:track:"):
+                candidate = candidate.split(":")[-1]
+            candidate = candidate.split("?")[0].split("#")[0]
+            if len(candidate) == 22 and candidate.replace("-", "").isalnum():
+                return candidate
+        return ""
+
     def extract_track_sequences(self, playlists: List[Dict]) -> List[List[str]]:
         """Extract track URI sequences from playlists."""
         sequences = []
@@ -69,11 +95,15 @@ class SMPDProcessor:
             if len(tracks) > self.max_playlist_length:
                 continue
 
-            # Extract Spotify track URIs
-            track_uris = [track['track_uri'] for track in tracks if 'track_uri' in track]
+            # Extract Spotify track IDs in canonical format
+            track_ids = []
+            for track in tracks:
+                normalised = self._normalise_track_id(track)
+                if normalised:
+                    track_ids.append(normalised)
 
-            if len(track_uris) >= self.min_playlist_length:
-                sequences.append(track_uris)
+            if len(track_ids) >= self.min_playlist_length:
+                sequences.append(track_ids)
 
         logger.info(f"Extracted {len(sequences):,} valid playlists")
         return sequences

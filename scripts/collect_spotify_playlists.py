@@ -228,11 +228,12 @@ async def main():
     try:
         collector = SpotifyPlaylistCollector(spotify)
 
-        # Strategy 1: Collect from categories
-        logger.info("=" * 60)
-        logger.info("Strategy 1: Collecting from categories...")
-        logger.info("=" * 60)
-        await collector.collect_from_categories(n_playlists_per_category=20)
+        # Strategy 1: Collect from categories (DISABLED - API returns 404)
+        # logger.info("=" * 60)
+        # logger.info("Strategy 1: Collecting from categories...")
+        # logger.info("=" * 60)
+        # await collector.collect_from_categories(n_playlists_per_category=20)
+        logger.info("Skipping categories (API unavailable), using curators instead...")
 
         # Strategy 2: Collect from featured playlists
         logger.info("\n" + "=" * 60)
@@ -240,14 +241,141 @@ async def main():
         logger.info("=" * 60)
         await collector.collect_from_featured(limit=50)
 
-        # Strategy 3: Collect from known curators
+        # Strategy 3: Collect from known curators (MASSIVELY EXPANDED)
         curators = [
+            # Major Labels & Official Spotify
             "spotify",
             "digster",
+            "filtr",
+            "topsify",
+            "sonymusic",
+            "warnermusic",
+            "universalmusicgroup",
+
+            # Genre Curators - Hip Hop/Rap
+            "rap",
+            "hiphopnation",
+            "rapstation",
+            "rapcaviar",
+            "mostneccessary",
+
+            # Genre Curators - Rock/Alternative
+            "indierockcafe",
+            "rockworkout",
+            "alternativerock",
+            "modernrock",
+            "classicrock",
+
+            # Genre Curators - Pop
+            "popculture",
+            "pophits",
+            "todaystophits",
+
+            # Genre Curators - Electronic/EDM
+            "edmlife",
+            "electronicmusic",
+            "chillnation",
+            "bass",
+
+            # Genre Curators - Jazz/Classical
+            "jazzcafe",
+            "classicalmusic",
+            "jazzvibes",
+
+            # Genre Curators - Country/Folk
+            "countrymusic",
+            "folkmusic",
+            "americana",
+
+            # Genre Curators - R&B/Soul
+            "rnbmusic",
+            "soulmusic",
+            "urban",
+
+            # Genre Curators - Latin
+            "latinmusic",
+            "reggaeton",
+            "urbanomusic",
+
+            # Genre Curators - Metal/Hard Rock
+            "metalmusicofficial",
+            "metalmusic",
+            "hardrock",
+
+            # Party/Mood Playlists
+            "fiestify",
+            "partymusic",
+            "workoutmusic",
+            "chillvibes",
+            "sleepmusic",
+
+            # Regional Curators
+            "spotifyuk",
+            "spotifyde",
+            "spotifyfr",
+            "spotifybr",
+            "spotifymx",
+            "spotifyjp",
+
+            # Music Blogs & Tastemakers
+            "pitchfork",
+            "stereogum",
+            "complexmusic",
+            "billboard",
+            "rollingstone",
+
+            # Decade/Era Playlists
+            "90smusic",
+            "80smusic",
+            "70smusic",
+            "2000smusic",
+
+            # Activity-Based
+            "gymmusic",
+            "studymusic",
+            "focusmusic",
+            "runningmusic",
+
+            # Additional Popular Curators
+            "soundsofspotify",
+            "spinninrecords",
+            "monstercat",
+            "mrsuicidesheep",
+            "trapcity",
+            "proximity",
+            "selected",
+            "majesticcasual",
+            "xkito",
+            "mrrevillz",
+
+            # Radio Stations
+            "bbcradio1",
+            "kissfmuk",
+            "capitalfm",
+
+            # More Genre Diversity
+            "kpop",
+            "jpop",
+            "afrobeats",
+            "dancehall",
+            "reggae",
+            "blues",
+            "funk",
+            "disco",
+            "house",
+            "techno",
+            "trance",
+            "dubstep",
+            "trap",
+            "indie",
+            "punk",
+            "grunge",
+            "emo",
+            "screamo",
         ]
 
         logger.info("\n" + "=" * 60)
-        logger.info("Strategy 3: Collecting from curators...")
+        logger.info(f"Strategy 3: Collecting from {len(curators)} curators...")
         logger.info("=" * 60)
         await collector.collect_from_user_playlists(curators)
 

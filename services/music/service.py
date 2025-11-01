@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from services.apple.client import AppleMusicClient
 from services.spotify.client import SpotifyClient
 from services.recommendation.catalogue import TrackCatalogue
-from services.recommendation.contextual_engine import ContextualRecommendationEngine
 from services.recommendation.playlist_builder import build_entries
+from api.engine_factory import get_engine
 
 logger = logging.getLogger(__name__)
 
@@ -27,18 +27,23 @@ class MusicService:
         self.spotify = spotify
         self.apple = apple or AppleMusicClient()
         self.catalogue: Optional[TrackCatalogue] = None
-        self.context_engine: Optional[ContextualRecommendationEngine] = None
+        self.context_engine = None  # Will be HybridRecommendationEngine or ContextualRecommendationEngine
 
         try:
-            self.catalogue = TrackCatalogue()
-            self.context_engine = ContextualRecommendationEngine(self.catalogue)
+            # Use factory to load hybrid engine with ML models (if available)
+            self.context_engine = get_engine()
+            self.catalogue = self.context_engine.catalogue
+
+            # Log which engine was loaded
+            engine_type = type(self.context_engine).__name__
             logger.info(
-                "✓ Contextual recommendation engine initialized with %d curated tracks",
-                self.catalogue.size(),
+                "✓ %s initialized with %d curated tracks",
+                engine_type,
+                self.catalogue.size() if self.catalogue else 0,
             )
         except (FileNotFoundError, ValueError) as exc:
             logger.error(
-                "✗ Failed to initialise contextual engine (%s) — falling back to provider heuristics",
+                "✗ Failed to initialise recommendation engine (%s) — falling back to provider heuristics",
                 exc,
             )
 
@@ -115,6 +120,11 @@ class MusicService:
         min_popularity: int = 0,
     ) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
         """Generate recommendations from a user-supplied playlist."""
+        import sys
+        print("=" * 80, flush=True)
+        print(f"[DEBUG] recommend_from_playlist CALLED with {len(tracks_payload)} tracks, limit={limit}", flush=True)
+        print("=" * 80, flush=True)
+        sys.stdout.flush()
 
         if not tracks_payload:
             return [], "playlist", {"playlist_size": 0}
@@ -172,7 +182,9 @@ class MusicService:
             raise RuntimeError("Could not resolve any tracks from supplied playlist data")
 
         track_ids = list(tracks_map.keys())
+        print(f"[DEBUG] Fetching features for {len(track_ids)} tracks: {track_ids[:3]}...", flush=True)
         features_map = await self.spotify.get_tracks_features_bulk(track_ids)
+        print(f"[DEBUG] Received features for {len(features_map)} tracks", flush=True)
 
         artist_ids: List[str] = []
         for track in tracks_map.values():
@@ -202,6 +214,10 @@ class MusicService:
 
         artist_map = await self.spotify.get_artists(artist_ids)
 
+        print(f"[DEBUG] tracks_map has {len(tracks_map)} tracks", flush=True)
+        print(f"[DEBUG] features_map has {len(features_map)} features", flush=True)
+        print(f"[DEBUG] artist_map has {len(artist_map)} artists", flush=True)
+
         entries = build_entries(
             tracks_map,
             features_map,
@@ -209,7 +225,73 @@ class MusicService:
             min_popularity=min_popularity,
         )
 
+        print(f"[DEBUG] Built {len(entries)} entries from tracks", flush=True)
+
         if not entries:
+            # Audio features failed (likely Spotify 403). Use item2vec-only path (no audio features needed)
+            print(f"[DEBUG] No entries built (audio features failed). Using item2vec-only recommendation path...", flush=True)
+
+            if hasattr(self.context_engine, 'recommend') and callable(getattr(self.context_engine, 'recommend')):
+                # Use HybridRecommendationEngine.recommend() which only needs track IDs
+                playlist_track_ids = list(tracks_map.keys())
+                print(f"[DEBUG] Calling engine.recommend() with {len(playlist_track_ids)} track IDs", flush=True)
+
+                ml_recommendations = self.context_engine.recommend(
+                    playlist_tracks=playlist_track_ids,
+                    limit=limit * 2  # Get 2x for diversity deduplication
+                )
+
+                print(f"[DEBUG] Got {len(ml_recommendations)} ML recommendations", flush=True)
+
+                # If no ML recommendations (cold-start), use popularity-based fallback
+                if not ml_recommendations:
+                    print(f"[DEBUG] No ML recommendations (cold-start). Using catalogue popularity fallback...", flush=True)
+
+                    # Get all tracks from the item2vec model
+                    if hasattr(self.context_engine, 'embedding_service') and self.context_engine.embedding_service:
+                        all_model_track_ids = list(self.context_engine.embedding_service.item2vec.wv.index_to_key)
+                        print(f"[DEBUG] Model has {len(all_model_track_ids)} tracks. Fetching top popular tracks...", flush=True)
+
+                        # Fetch metadata for top N popular tracks from the model
+                        sample_size = min(200, len(all_model_track_ids))
+                        import random
+                        sample_ids = random.sample(all_model_track_ids, sample_size)
+
+                        model_tracks = await self.spotify.get_tracks_bulk(sample_ids)
+
+                        # Sort by popularity and take top
+                        popular_tracks = sorted(
+                            model_tracks.values(),
+                            key=lambda t: t.get('popularity', 0),
+                            reverse=True
+                        )[:limit * 2]
+
+                        ml_recommendations = [
+                            {
+                                **track,
+                                "rank_score": track.get('popularity', 0) / 100.0  # Normalize to 0-1
+                            }
+                            for track in popular_tracks
+                        ]
+
+                        print(f"[DEBUG] Using {len(ml_recommendations)} popular tracks as fallback", flush=True)
+
+                if ml_recommendations:
+                    # Enrich with Spotify metadata
+                    enriched = await self._enrich_with_spotify_metadata(ml_recommendations)
+                    enriched = await self._ensure_media_assets(enriched)
+                    diverse = self._deduplicate_by_artist(enriched, max_per_artist=2, limit=limit)
+
+                    playlist_info = self._build_playlist_info(
+                        total_tracks=len(tracks_map),
+                        resolved_tracks=len(tracks_map),
+                        profile_context=None,
+                    )
+
+                    print(f"[DEBUG] Returning {len(diverse)} diverse ML recommendations", flush=True)
+                    return diverse, "ml-playlist", playlist_info
+
+            # Final fallback to Apple
             fallback_recommendations = await self._apple_playlist_fallback(
                 normalised_inputs,
                 limit=limit,
@@ -238,6 +320,7 @@ class MusicService:
         )
 
         prefer_apple = (self.spotify and self.spotify.demo_mode) or not self.context_engine
+        print(f"[DEBUG] prefer_apple={prefer_apple}, demo_mode={self.spotify.demo_mode if self.spotify else None}, has_engine={self.context_engine is not None}", flush=True)
         if prefer_apple:
             fallback_recommendations = await self._apple_playlist_fallback(normalised_inputs, limit=limit)
             if fallback_recommendations:
@@ -269,17 +352,32 @@ class MusicService:
 
         seed_features = features_map.get(seed_id) if seed_id else None
 
+        print(f"[DEBUG] Calling context_engine.get_recommendations with seed_id={seed_id}, limit={limit * 2}", flush=True)
+
+        # Get 2x recommendations to account for artist deduplication after enrichment
         recommendations = await self.context_engine.get_recommendations(
             seed_track_id=seed_id,
             seed_metadata=seed_metadata,
             seed_features=seed_features,
             context=context,
             user_profile=user_profile,
-            limit=limit,
+            limit=limit * 2,  # Request extra
         )
+
+        # Fetch real Spotify metadata for ML-recommended tracks
+        print(f"[DEBUG] Before enrichment: {len(recommendations)} recommendations", flush=True)
+        recommendations = await self._enrich_with_spotify_metadata(recommendations)
+        print(f"[DEBUG] After enrichment: {len(recommendations)} recommendations", flush=True)
 
         # Re-enrich recommendations with Spotify/Apple assets if available
         recommendations = await self._ensure_media_assets(recommendations)
+
+        # Apply artist diversity AFTER enrichment (when we have real artist names)
+        print(f"[DEBUG] Before deduplication: {len(recommendations)} recommendations", flush=True)
+        print(f"[DEBUG] Artists before dedup: {[r.get('artist', 'Unknown')[:30] for r in recommendations[:10]]}", flush=True)
+        recommendations = self._deduplicate_by_artist(recommendations, max_per_artist=2, limit=limit)
+        print(f"[DEBUG] After deduplication: {len(recommendations)} recommendations", flush=True)
+        print(f"[DEBUG] Artists after dedup: {[r.get('artist', 'Unknown')[:30] for r in recommendations[:10]]}", flush=True)
 
         if recommendations:
             return recommendations, "playlist", playlist_info
@@ -355,6 +453,81 @@ class MusicService:
     def save_recommendation_state(self) -> None:
         """Save recommendation engine state."""
         logger.debug("Contextual engine is stateless; nothing to persist")
+
+    def _deduplicate_by_artist(
+        self,
+        tracks: List[Dict[str, Any]],
+        max_per_artist: int = 2,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Apply artist diversity after enrichment with real metadata."""
+        logger.info(f"🔍 _deduplicate_by_artist called with {len(tracks)} tracks, limit={limit}")
+
+        artist_counts = {}
+        diverse_tracks = []
+
+        # Count all artists first for debugging
+        all_artists = {}
+        for track in tracks:
+            artist = track.get("artist", "Unknown")
+            all_artists[artist] = all_artists.get(artist, 0) + 1
+
+        logger.info(f"🎵 Artist distribution in candidates: {all_artists}")
+
+        for track in tracks:
+            artist = track.get("artist", "Unknown")
+            count = artist_counts.get(artist, 0)
+
+            if count < max_per_artist:
+                diverse_tracks.append(track)
+                artist_counts[artist] = count + 1
+
+                if len(diverse_tracks) >= limit:
+                    break
+
+        logger.info(f"✅ After deduplication: {len(diverse_tracks)} tracks with artists: {artist_counts}")
+        return diverse_tracks
+
+    async def _enrich_with_spotify_metadata(self, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Fetch real Spotify metadata for ML-recommended tracks (replaces stub data)."""
+        if not tracks or not self.spotify:
+            return tracks
+
+        logger.info(f"🔧 _enrich_with_spotify_metadata called with {len(tracks)} tracks")
+
+        # Identify tracks that need Spotify data (stub tracks with fake artists)
+        track_ids_to_fetch = []
+        for track in tracks:
+            artist = track.get("artist", "")
+            logger.debug(f"Track {track.get('id')[:20]}... has artist: {artist}")
+            # Check if it's a stub track (fake artist name)
+            if artist.startswith("Artist_") or artist == track.get("id"):
+                track_ids_to_fetch.append(track["id"])
+
+        logger.info(f"🎯 Found {len(track_ids_to_fetch)} stub tracks to enrich")
+
+        if not track_ids_to_fetch:
+            return tracks
+
+        # Fetch real Spotify data in bulk
+        logger.info(f"🌐 Fetching Spotify metadata for {len(track_ids_to_fetch)} ML-recommended tracks")
+        spotify_tracks = await self.spotify.get_tracks_bulk(track_ids_to_fetch)
+
+        # Replace stub data with real Spotify data
+        enriched_tracks = []
+        for track in tracks:
+            track_id = track.get("id")
+            if track_id in spotify_tracks:
+                # Replace with real Spotify track data
+                real_track = spotify_tracks[track_id]
+                # Preserve the recommendation metadata
+                real_track["recommendation"] = track.get("recommendation")
+                real_track["i2v_embedding"] = track.get("i2v_embedding")
+                enriched_tracks.append(real_track)
+            else:
+                enriched_tracks.append(track)
+
+        return enriched_tracks
 
     async def _ensure_media_assets(self, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not tracks or not self.apple:

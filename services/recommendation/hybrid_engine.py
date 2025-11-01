@@ -206,9 +206,10 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
         if self.embedding_service:
             playlist_track_ids = list(user_profile.get("track_ids", []))
             if playlist_track_ids:
+                # Fetch ALL tracks for maximum diversity after filtering
                 playlist_neighbors = self.embedding_service.get_playlist_neighbors(
                     track_ids=playlist_track_ids,
-                    k=min(1000, limit),
+                    k=333,  # Get all tracks from item2vec
                 )
                 candidate_ids.update(playlist_neighbors)
                 logger.info(f"Retrieved {len(playlist_neighbors)} playlist neighbors")
@@ -220,23 +221,39 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
         candidate_ids.update(c["id"] for c in context_candidates if "id" in c)
         logger.info(f"Retrieved {len(context_candidates)} context-filtered candidates")
 
-        # Remove playlist tracks
-        playlist_track_ids = user_profile.get("track_ids", set())
-        candidate_ids -= playlist_track_ids
+        # Remove playlist tracks (convert to set for efficient filtering)
+        playlist_track_ids_set = set(user_profile.get("track_ids", []))
+        candidate_ids -= playlist_track_ids_set
+        logger.info(f"After filtering playlist tracks: {len(candidate_ids)} candidates remain")
 
-        # Lookup full track data
+        # Lookup full track data (or create stubs for ML tracks not in catalogue)
         candidates = []
         for track_id in candidate_ids:
-            track = self.catalogue.get_track_by_id(track_id)
-            if track:
-                # Add item2vec embedding if available
-                if self.embedding_service:
-                    emb = self.embedding_service.item2vec.vector(track_id)
-                    if emb is not None:
-                        track["i2v_embedding"] = emb
+            track = self.catalogue.get_by_id(track_id)
 
-                candidates.append(track)
+            if not track:
+                # Create minimal track stub for ML-known tracks not in catalogue
+                track = {
+                    "id": track_id,
+                    "name": track_id,
+                    "artist": f"Artist_{hash(track_id) % 10000}",
+                    "popularity": 50,
+                    "audio_features": {},
+                    "tags": {"genres": [], "moods": []},
+                }
 
+            # Add item2vec embedding if available
+            if self.embedding_service:
+                emb = self.embedding_service.item2vec.vector(track_id)
+                if emb is not None:
+                    track["i2v_embedding"] = emb
+
+            candidates.append(track)
+
+        logger.info(f"Final candidates: {len(candidates)} (with embeddings: {sum(1 for c in candidates if 'i2v_embedding' in c)})")
+
+        # IMPORTANT: Return both candidates AND their track IDs for Spotify enrichment
+        # This allows the service layer to fetch real metadata before diversity
         return candidates
 
     def _get_context_filtered_candidates(
@@ -317,18 +334,20 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
             query_vec = self.embedding_service.item2vec.mean_vector(playlist_track_ids)
 
         # Apply combined MMR + artist diversity
+        # Note: max_per_artist is generous because tracks are enriched with real data later
         diverse_candidates = combined_diversity_rerank(
             candidates=candidates,
             query_vec=query_vec,
-            lambda_param=0.7,  # 70% relevance, 30% diversity
-            k=limit,
-            max_per_artist=2,
+            lambda_param=0.6,  # 60% relevance, 40% diversity (more diversity)
+            k=limit * 3,  # Get 3x more to account for post-enrichment deduplication
+            max_per_artist=10,  # Allow more per artist (fake artists will be replaced)
             embedding_key="i2v_embedding",
             score_key="rank_score",
             artist_key="artist",
         )
 
-        return diverse_candidates
+        # Return extra candidates so service layer can dedupe after enrichment
+        return diverse_candidates[:limit * 2]  # 2x the requested amount
 
     def _apply_diversity_simple(
         self,

@@ -244,13 +244,17 @@ class SpotifyClient:
                 resp = await self._request("GET", "https://api.spotify.com/v1/audio-features",
                                           params={"ids": ids_param})
 
+                print(f"[DEBUG SPOTIFY] Audio features response status: {resp.status_code}", flush=True)
                 if resp.status_code == 200:
                     data = resp.json()
+                    print(f"[DEBUG SPOTIFY] Got {len(data.get('audio_features', []))} audio features in response", flush=True)
                     for features in data.get("audio_features", []):
                         if features:  # API returns null for tracks without features
                             track_id = features.get("id")
                             features_dict[track_id] = features
                             await self._cache_set(self._features_cache, track_id, features)
+                else:
+                    print(f"[DEBUG SPOTIFY] Non-200 response: {resp.text[:200]}", flush=True)
 
         except httpx.HTTPError as exc:
             logger.warning("Batch features fetch failed (%s), falling back to individual fetches", exc)

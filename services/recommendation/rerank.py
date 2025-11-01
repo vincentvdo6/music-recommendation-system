@@ -62,13 +62,16 @@ def mmr_rerank(
     # Limit k to available candidates
     k = min(k, len(candidates))
 
-    # Check if candidates have embeddings
-    if embedding_key not in candidates[0]:
-        logger.warning(f"Candidates missing '{embedding_key}', skipping MMR")
+    # Separate candidates with embeddings from those without
+    with_embeddings = [c for c in candidates if embedding_key in c]
+    without_embeddings = [c for c in candidates if embedding_key not in c]
+
+    if not with_embeddings:
+        logger.warning(f"No candidates contain '{embedding_key}', skipping MMR")
         return candidates[:k]
 
     selected = []
-    pool = candidates.copy()
+    pool = with_embeddings.copy()
 
     while len(selected) < k and pool:
         # Compute MMR score for each candidate in pool
@@ -107,6 +110,11 @@ def mmr_rerank(
 
         selected.append(best_candidate)
         pool.pop(best_idx)
+
+    # If we still need more items, append candidates that lacked embeddings
+    if len(selected) < k and without_embeddings:
+        remaining = k - len(selected)
+        selected.extend(without_embeddings[:remaining])
 
     return selected
 
