@@ -463,6 +463,13 @@ class MusicService:
         """Apply artist diversity after enrichment with real metadata."""
         logger.info(f"🔍 _deduplicate_by_artist called with {len(tracks)} tracks, limit={limit}")
 
+        # Blacklist for children's music and low-quality artists
+        artist_blacklist_keywords = [
+            'kids', 'children', 'bambini', 'enfants', 'kinder', 'niños',
+            'baby', 'toddler', 'nursery', 'lullaby', 'kinderlieder',
+            'canzoni per bambini', 'musicclub', 'evviva', 'famiglia',
+        ]
+
         artist_counts = {}
         diverse_tracks = []
 
@@ -475,12 +482,21 @@ class MusicService:
         logger.info(f"🎵 Artist distribution in candidates: {all_artists}")
 
         for track in tracks:
-            artist = track.get("artist", "Unknown")
-            count = artist_counts.get(artist, 0)
+            artist = track.get("artist", "Unknown").lower()
+            track_name = track.get("name", "").lower()
+
+            # Skip children's music and blacklisted content
+            if any(keyword in artist for keyword in artist_blacklist_keywords):
+                continue
+            if any(keyword in track_name for keyword in artist_blacklist_keywords):
+                continue
+
+            artist_display = track.get("artist", "Unknown")
+            count = artist_counts.get(artist_display, 0)
 
             if count < max_per_artist:
                 diverse_tracks.append(track)
-                artist_counts[artist] = count + 1
+                artist_counts[artist_display] = count + 1
 
                 if len(diverse_tracks) >= limit:
                     break

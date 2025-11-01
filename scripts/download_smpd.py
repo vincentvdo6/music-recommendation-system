@@ -86,7 +86,24 @@ class SMPDProcessor:
         """Extract track URI sequences from playlists."""
         sequences = []
 
+        # Keywords to filter out children's/low-quality playlists
+        exclude_keywords = [
+            'kids', 'children', 'bambini', 'enfants', 'kinder', 'niños',
+            'baby', 'toddler', 'nursery', 'lullaby', 'kinderlieder',
+            'canzoni per bambini', 'canciones infantiles',
+        ]
+
         for playlist in playlists:
+            # Filter playlists by name (exclude children's music)
+            playlist_name = playlist.get('name', '').lower()
+            if any(keyword in playlist_name for keyword in exclude_keywords):
+                continue
+
+            # Filter playlists by category
+            category = playlist.get('category', '').lower()
+            if any(keyword in category for keyword in exclude_keywords):
+                continue
+
             tracks = playlist.get('tracks', [])
 
             # Filter by playlist length
