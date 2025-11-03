@@ -13,6 +13,7 @@ from services.recommendation.contextual_engine import ContextualRecommendationEn
 from services.recommendation.embeddings import EmbeddingService
 from services.recommendation.ranker import LearnedRanker
 from services.recommendation.catalogue import TrackCatalogue
+from services.recommendation.ncf_loader import load_ncf_model
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class EngineFactory:
         item2vec_path: str = "models/item2vec/item2vec.wordvectors",
         ann_index_path: str = "models/item2vec/ann_index",
         ranker_path: str = "models/ranker/lightgbm_ranker.txt",
+        ncf_path: str = "models/ncf/ncf_model.pt",
         use_mmr: bool = True,
     ):
         """
@@ -36,6 +38,7 @@ class EngineFactory:
             item2vec_path: Path to item2vec embeddings
             ann_index_path: Path to ANN index
             ranker_path: Path to learned ranker
+            ncf_path: Path to NCF model checkpoint
             use_mmr: Use MMR diversity reranking
 
         Returns:
@@ -77,20 +80,35 @@ class EngineFactory:
         else:
             logger.info(f"Ranker not found at {ranker_path}, using SimpleRanker")
 
+        # Try to load NCF model (Phase 2)
+        ncf_recommender = None
+        if Path(ncf_path).exists():
+            try:
+                ncf_recommender = load_ncf_model(Path(ncf_path))
+                if ncf_recommender:
+                    logger.info("✓ NCF model loaded successfully")
+            except Exception as e:
+                logger.warning(f"Failed to load NCF model: {e}")
+                ncf_recommender = None
+        else:
+            logger.info(f"NCF model not found at {ncf_path}")
+
         # Determine if we should use MMR
         use_mmr_final = use_mmr and (embedding_service is not None)
 
         # Create hybrid engine
-        if embedding_service or ranker:
+        if embedding_service or ranker or ncf_recommender:
             logger.info("Creating HybridRecommendationEngine")
-            logger.info(f"  - Embeddings: {'✓' if embedding_service else '✗'}")
+            logger.info(f"  - Embeddings (item2vec): {'✓' if embedding_service else '✗'}")
             logger.info(f"  - Learned ranker: {'✓' if ranker else '✗'}")
+            logger.info(f"  - NCF (deep learning): {'✓' if ncf_recommender else '✗'}")
             logger.info(f"  - MMR diversity: {'✓' if use_mmr_final else '✗'}")
 
             return HybridRecommendationEngine(
                 catalogue=catalogue,
                 embedding_service=embedding_service,
                 ranker=ranker,
+                ncf_recommender=ncf_recommender,
                 use_mmr=use_mmr_final,
             )
         else:

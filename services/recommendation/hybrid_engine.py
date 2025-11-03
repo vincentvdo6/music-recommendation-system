@@ -39,6 +39,7 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
         catalogue,
         embedding_service: Optional[EmbeddingService] = None,
         ranker: Optional[LearnedRanker] = None,
+        ncf_recommender: Optional[Any] = None,
         use_mmr: bool = True,
         **kwargs
     ):
@@ -49,12 +50,14 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
             catalogue: TrackCatalogue instance
             embedding_service: Item2vec embedding service (optional)
             ranker: Learned ranker (optional, falls back to SimpleRanker)
+            ncf_recommender: Neural Collaborative Filtering recommender (optional, Phase 2)
             use_mmr: Whether to apply MMR diversity reranking
             **kwargs: Additional args for base engine
         """
         super().__init__(catalogue, **kwargs)
 
         self.embedding_service = embedding_service
+        self.ncf_recommender = ncf_recommender
         self.use_mmr = use_mmr
 
         # Initialize ranker
@@ -508,7 +511,7 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
         candidates: List[Dict[str, Any]],
         playlist_tracks: List[str],
     ) -> List[Dict[str, Any]]:
-        """Simple ranking for evaluation."""
+        """Simple ranking for evaluation with optional NCF blending."""
         # Build playlist profile
         playlist_profile = {
             "artists": set(),
@@ -522,6 +525,29 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
             if playlist_emb is not None:
                 playlist_profile["i2v_embedding"] = playlist_emb
 
+        # Add NCF scores if available (Phase 2)
+        if self.ncf_recommender:
+            candidate_ids = [c['id'] for c in candidates]
+            try:
+                ncf_scores = self.ncf_recommender.recommend_for_tracks(
+                    track_ids=playlist_tracks,
+                    candidate_track_ids=candidate_ids,
+                    top_k=len(candidates),
+                )
+
+                # Create NCF score map
+                ncf_score_map = {track_id: score for track_id, score in ncf_scores}
+
+                # Add NCF scores to candidates
+                for candidate in candidates:
+                    track_id = candidate.get('id')
+                    if track_id in ncf_score_map:
+                        candidate['ncf_score'] = ncf_score_map[track_id]
+
+                logger.info(f"Added NCF scores to {len(ncf_score_map)} candidates")
+            except Exception as e:
+                logger.warning(f"NCF scoring failed: {e}")
+
         # Rank using ranker
         ranked = self.ranker.rank_candidates(
             candidates=candidates,
@@ -529,5 +555,17 @@ class HybridRecommendationEngine(ContextualRecommendationEngine):
             playlist_profile=playlist_profile,
             seed_track=None,
         )
+
+        # Blend NCF scores with ranker scores if available
+        if self.ncf_recommender:
+            for track in ranked:
+                ncf_score = track.get('ncf_score', 0.0)
+                rank_score = track.get('rank_score', 0.0)
+
+                # Weighted ensemble: 60% ranker, 40% NCF
+                track['rank_score'] = 0.6 * rank_score + 0.4 * ncf_score
+
+            # Re-sort by blended scores
+            ranked.sort(key=lambda x: x.get('rank_score', 0), reverse=True)
 
         return ranked
