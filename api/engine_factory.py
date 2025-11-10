@@ -27,7 +27,7 @@ class EngineFactory:
         item2vec_path: str = "models/item2vec/item2vec.wordvectors",
         ann_index_path: str = "models/item2vec/ann_index",
         ranker_path: str = "models/ranker/lightgbm_ranker.txt",
-        ncf_path: str = "models/ncf/ncf_model.pt",
+        ncf_path: str = "models/ncf/neumf_bpr_best.pt",
         use_mmr: bool = True,
     ):
         """

@@ -118,6 +118,87 @@ class FeatureExtractor:
             features["valence_diff"] = 0.5
             features["energy_diff"] = 0.5
 
+        # === NEW FEATURES ===
+
+        # 9. Cross features (interaction terms - capture combined signal strength)
+        features["i2v_x_audio"] = features["i2v_cosine"] * features["audio_similarity"]
+        features["popularity_x_genre_match"] = features["popularity"] * features["genre_jaccard"]
+        features["seed_i2v_x_audio"] = features["seed_i2v_cosine"] * features["seed_audio_sim"]
+
+        # 10. Temporal features
+        candidate_year = candidate.get("release_year", 2020)
+        current_year = 2025  # Update this periodically or use datetime.now().year
+
+        # Recency score (exponential decay: newer = higher score)
+        years_old = max(0, current_year - candidate_year)
+        features["recency_score"] = np.exp(-years_old / 10.0)  # decay over ~10 years
+
+        # Binary flag for very recent releases (last 2 years)
+        features["is_recent"] = float(years_old <= 2)
+
+        # Decade match (same decade as playlist average)
+        playlist_year = playlist_profile.get("avg_year", 2020)
+        candidate_decade = (candidate_year // 10) * 10
+        playlist_decade = (playlist_year // 10) * 10
+        features["decade_match"] = float(candidate_decade == playlist_decade)
+
+        # 11. Additional content features
+        if "audio_features" in candidate and "audio_features" in playlist_profile:
+            cand_af = candidate["audio_features"]
+            prof_af = playlist_profile["audio_features"]
+
+            # Danceability match
+            features["danceability_diff"] = abs(
+                cand_af.get("danceability", 0.5) - prof_af.get("danceability", 0.5)
+            )
+
+            # Tempo match (normalized)
+            cand_tempo = cand_af.get("tempo", 120)
+            prof_tempo = prof_af.get("tempo", 120)
+            tempo_diff = abs(cand_tempo - prof_tempo)
+            features["tempo_match"] = 1.0 - min(tempo_diff / 100.0, 1.0)  # normalize to [0, 1]
+
+            # Acousticness match
+            features["acousticness_diff"] = abs(
+                cand_af.get("acousticness", 0.5) - prof_af.get("acousticness", 0.5)
+            )
+
+            # Mood stability (low variance in both valence AND energy = stable mood match)
+            mood_variance = features["valence_diff"] + features["energy_diff"]
+            features["mood_stability"] = 1.0 - min(mood_variance / 2.0, 1.0)  # normalize
+
+        else:
+            features["danceability_diff"] = 0.5
+            features["tempo_match"] = 0.5
+            features["acousticness_diff"] = 0.5
+            features["mood_stability"] = 0.0
+
+        # 12. Popularity features (refined)
+        raw_popularity = candidate.get("popularity", 50)
+
+        # Popularity percentile (already have as "popularity")
+        # Add popularity bucket for non-linear effects
+        if raw_popularity >= 80:
+            features["popularity_tier"] = 1.0  # Very popular
+        elif raw_popularity >= 50:
+            features["popularity_tier"] = 0.66  # Moderately popular
+        elif raw_popularity >= 20:
+            features["popularity_tier"] = 0.33  # Niche
+        else:
+            features["popularity_tier"] = 0.0  # Very niche
+
+        # 13. Signal strength indicators (confidence in recommendations)
+        # High confidence when both collaborative and content signals agree
+        features["signal_agreement"] = min(
+            features["i2v_cosine"] + features["audio_similarity"],
+            1.0
+        ) if (features["i2v_cosine"] > 0 and features["audio_similarity"] > 0) else 0.0
+
+        # Has strong seed match (useful for seed-based recommendations)
+        features["strong_seed_match"] = float(
+            features["seed_i2v_cosine"] > 0.5 or features["seed_audio_sim"] > 0.7
+        )
+
         return features
 
     @staticmethod
@@ -254,14 +335,30 @@ class SimpleRanker:
     Simple weighted ranker (fallback when no learned model).
 
     Uses hand-tuned weights for combining signals.
+    Updated to include new cross-features and temporal features.
     """
 
     DEFAULT_WEIGHTS = {
-        "i2v_cosine": 0.35,
-        "audio_similarity": 0.30,
-        "popularity": 0.15,
-        "genre_jaccard": 0.10,
-        "seed_i2v_cosine": 0.10,
+        # Core signals
+        "i2v_cosine": 0.20,
+        "audio_similarity": 0.18,
+        "seed_i2v_cosine": 0.08,
+
+        # Cross features (interaction terms - high value!)
+        "i2v_x_audio": 0.15,  # Strong combined signal
+        "popularity_x_genre_match": 0.08,  # Popular within user's taste
+
+        # Content features
+        "genre_jaccard": 0.07,
+        "mood_stability": 0.06,
+        "tempo_match": 0.04,
+
+        # Temporal features
+        "decade_match": 0.05,
+        "recency_score": 0.03,
+
+        # Popularity (reduced weight, now also in cross feature)
+        "popularity": 0.06,
     }
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):

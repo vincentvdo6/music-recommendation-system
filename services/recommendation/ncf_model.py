@@ -4,14 +4,20 @@ Neural Collaborative Filtering (NCF) for music recommendations.
 Implements NeuMF architecture combining:
 - Generalized Matrix Factorization (GMF): Linear interactions
 - Multi-Layer Perceptron (MLP): Non-linear interactions
+
+Enhanced with:
+- BPR (Bayesian Personalized Ranking) loss for implicit feedback
+- Hard negative sampling for better training
+- In-batch negatives for efficiency
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -281,3 +287,394 @@ class NCFRecommender:
         results.sort(key=lambda x: x[1], reverse=True)
 
         return results[:top_k]
+
+
+# ============================================================================
+# BPR Loss and Negative Sampling
+# ============================================================================
+
+
+class BPRLoss(nn.Module):
+    """
+    Bayesian Personalized Ranking loss for implicit feedback.
+
+    BPR optimizes pairwise ranking: positive items should be ranked
+    higher than negative items.
+
+    Loss = -log(sigmoid(pos_score - neg_score))
+
+    References:
+    - Rendle et al. "BPR: Bayesian Personalized Ranking from Implicit Feedback" (UAI 2009)
+    """
+
+    def __init__(self, weight_decay: float = 0.0):
+        """
+        Args:
+            weight_decay: L2 regularization weight (applied to model parameters separately)
+        """
+        super().__init__()
+        self.weight_decay = weight_decay
+
+    def forward(
+        self,
+        pos_scores: torch.Tensor,
+        neg_scores: torch.Tensor,
+        model: Optional[nn.Module] = None,
+    ) -> torch.Tensor:
+        """
+        Compute BPR loss.
+
+        Args:
+            pos_scores: (batch_size,) scores for positive items
+            neg_scores: (batch_size,) or (batch_size, num_negatives) scores for negative items
+            model: Optional model for L2 regularization
+
+        Returns:
+            Scalar loss
+        """
+        # BPR loss: maximize difference between positive and negative scores
+        # -log(sigmoid(pos - neg))
+
+        if neg_scores.dim() == 2:
+            # Multiple negatives per positive: (batch_size, num_negatives)
+            pos_scores = pos_scores.unsqueeze(1)  # (batch_size, 1)
+            diff = pos_scores - neg_scores  # (batch_size, num_negatives)
+            loss = -F.logsigmoid(diff).mean()
+        else:
+            # Single negative per positive: (batch_size,)
+            diff = pos_scores - neg_scores
+            loss = -F.logsigmoid(diff).mean()
+
+        # Add L2 regularization if model provided
+        if model is not None and self.weight_decay > 0:
+            l2_reg = 0
+            for param in model.parameters():
+                l2_reg += torch.norm(param, p=2)
+            loss = loss + self.weight_decay * l2_reg
+
+        return loss
+
+
+class NegativeSampler:
+    """
+    Negative sampling strategies for BPR training.
+
+    Supports:
+    - Random sampling
+    - Popularity-biased sampling (sample popular items more often)
+    - Hard negative sampling (items similar to positives but not in playlist)
+    """
+
+    def __init__(
+        self,
+        num_items: int,
+        popularity: Optional[np.ndarray] = None,
+        sampling_strategy: str = "popularity_biased",
+        alpha: float = 0.75,
+    ):
+        """
+        Args:
+            num_items: Total number of items in the catalogue
+            popularity: (num_items,) popularity scores for items (for biased sampling)
+            sampling_strategy: "random", "popularity_biased", or "hard"
+            alpha: Exponent for popularity bias (0.75 is Mikolov's recommendation)
+        """
+        self.num_items = num_items
+        self.sampling_strategy = sampling_strategy
+        self.alpha = alpha
+
+        # Precompute sampling probabilities for popularity-biased sampling
+        if sampling_strategy == "popularity_biased" and popularity is not None:
+            # P(item) ∝ popularity^alpha
+            # This balances between uniform (alpha=0) and popularity (alpha=1)
+            probs = np.power(popularity + 1e-6, alpha)
+            self.sampling_probs = probs / probs.sum()
+        else:
+            self.sampling_probs = None
+
+    def sample(
+        self,
+        batch_size: int,
+        num_negatives: int = 1,
+        exclude_items: Optional[List[List[int]]] = None,
+    ) -> np.ndarray:
+        """
+        Sample negative items for a batch.
+
+        Args:
+            batch_size: Number of samples in the batch
+            num_negatives: Number of negative samples per positive
+            exclude_items: List of lists of items to exclude for each sample
+                          (e.g., items already in the playlist)
+
+        Returns:
+            (batch_size, num_negatives) array of negative item IDs
+        """
+        if self.sampling_strategy == "random":
+            return self._sample_random(batch_size, num_negatives, exclude_items)
+        elif self.sampling_strategy == "popularity_biased":
+            return self._sample_popularity_biased(batch_size, num_negatives, exclude_items)
+        else:
+            raise ValueError(f"Unknown sampling strategy: {self.sampling_strategy}")
+
+    def _sample_random(
+        self,
+        batch_size: int,
+        num_negatives: int,
+        exclude_items: Optional[List[List[int]]],
+    ) -> np.ndarray:
+        """Uniform random sampling."""
+        negatives = np.zeros((batch_size, num_negatives), dtype=np.int64)
+
+        for i in range(batch_size):
+            exclude = set(exclude_items[i]) if exclude_items else set()
+            candidates = [j for j in range(self.num_items) if j not in exclude]
+
+            if len(candidates) < num_negatives:
+                # Not enough candidates, sample with replacement
+                negatives[i] = np.random.choice(candidates, size=num_negatives, replace=True)
+            else:
+                negatives[i] = np.random.choice(candidates, size=num_negatives, replace=False)
+
+        return negatives
+
+    def _sample_popularity_biased(
+        self,
+        batch_size: int,
+        num_negatives: int,
+        exclude_items: Optional[List[List[int]]],
+    ) -> np.ndarray:
+        """Sample negatives proportional to popularity^alpha."""
+        if self.sampling_probs is None:
+            logger.warning("No popularity provided, falling back to random sampling")
+            return self._sample_random(batch_size, num_negatives, exclude_items)
+
+        negatives = np.zeros((batch_size, num_negatives), dtype=np.int64)
+
+        for i in range(batch_size):
+            exclude = set(exclude_items[i]) if exclude_items else set()
+
+            # Adjust probabilities to exclude certain items
+            probs = self.sampling_probs.copy()
+            if exclude:
+                exclude_indices = list(exclude)
+                probs[exclude_indices] = 0
+                probs = probs / probs.sum()  # Renormalize
+
+            negatives[i] = np.random.choice(
+                self.num_items, size=num_negatives, replace=False, p=probs
+            )
+
+        return negatives
+
+    @staticmethod
+    def sample_hard_negatives(
+        model: NeuMF,
+        playlist_ids: torch.Tensor,
+        positive_items: torch.Tensor,
+        num_candidates: int = 100,
+        num_negatives: int = 5,
+        exclude_items: Optional[List[List[int]]] = None,
+        device: str = "cpu",
+    ) -> torch.Tensor:
+        """
+        Sample hard negatives: items with high scores but not in the playlist.
+
+        These are "hard" because the model currently thinks they're good matches,
+        so training on them provides strong learning signal.
+
+        Args:
+            model: NeuMF model
+            playlist_ids: (batch_size,) playlist IDs
+            positive_items: (batch_size,) positive item IDs
+            num_candidates: Number of random candidates to score
+            num_negatives: Number of hard negatives to return per sample
+            exclude_items: Items to exclude (e.g., items already in playlist)
+            device: Device to run on
+
+        Returns:
+            (batch_size, num_negatives) hard negative item IDs
+        """
+        model.eval()
+        batch_size = playlist_ids.size(0)
+        hard_negatives = torch.zeros((batch_size, num_negatives), dtype=torch.long)
+
+        with torch.no_grad():
+            for i in range(batch_size):
+                playlist_id = playlist_ids[i].item()
+                exclude = set(exclude_items[i]) if exclude_items else set()
+                exclude.add(positive_items[i].item())  # Also exclude the positive
+
+                # Sample random candidates
+                candidates = [j for j in range(model.num_tracks) if j not in exclude]
+                if len(candidates) < num_negatives:
+                    # Not enough candidates
+                    sampled_candidates = np.random.choice(
+                        candidates, size=num_negatives, replace=True
+                    )
+                else:
+                    sampled_candidates = np.random.choice(
+                        candidates, size=min(num_candidates, len(candidates)), replace=False
+                    )
+
+                # Score candidates
+                playlist_batch = torch.LongTensor([playlist_id] * len(sampled_candidates)).to(device)
+                candidate_batch = torch.LongTensor(sampled_candidates).to(device)
+                scores = model.forward(playlist_batch, candidate_batch).cpu().numpy()
+
+                # Select top-scoring candidates as hard negatives
+                top_indices = np.argsort(scores)[-num_negatives:][::-1]
+                hard_negatives[i] = torch.LongTensor(sampled_candidates[top_indices])
+
+        model.train()
+        return hard_negatives.to(device)
+
+
+class BPRTrainer:
+    """
+    Trainer for NeuMF with BPR loss.
+
+    Handles training loop with negative sampling, hard negative mining,
+    and in-batch negatives.
+    """
+
+    def __init__(
+        self,
+        model: NeuMF,
+        negative_sampler: NegativeSampler,
+        learning_rate: float = 0.001,
+        weight_decay: float = 1e-5,
+        device: str = "cpu",
+        use_hard_negatives: bool = False,
+        hard_neg_ratio: float = 0.3,
+    ):
+        """
+        Args:
+            model: NeuMF model to train
+            negative_sampler: NegativeSampler instance
+            learning_rate: Learning rate for optimizer
+            weight_decay: L2 regularization weight
+            device: Device to train on
+            use_hard_negatives: Whether to use hard negative mining
+            hard_neg_ratio: Ratio of hard negatives (rest are random/popularity-biased)
+        """
+        self.model = model.to(device)
+        self.negative_sampler = negative_sampler
+        self.device = device
+        self.use_hard_negatives = use_hard_negatives
+        self.hard_neg_ratio = hard_neg_ratio
+
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        self.criterion = BPRLoss(weight_decay=0)  # weight_decay handled by optimizer
+
+    def train_step(
+        self,
+        playlist_ids: torch.Tensor,
+        positive_items: torch.Tensor,
+        exclude_items: Optional[List[List[int]]] = None,
+        num_negatives: int = 1,
+    ) -> float:
+        """
+        Single training step with BPR loss.
+
+        Args:
+            playlist_ids: (batch_size,) playlist IDs
+            positive_items: (batch_size,) positive item IDs
+            exclude_items: List of lists of items to exclude for negative sampling
+            num_negatives: Number of negative samples per positive
+
+        Returns:
+            Loss value
+        """
+        self.model.train()
+        batch_size = playlist_ids.size(0)
+
+        # Get positive scores
+        pos_scores = self.model.forward(playlist_ids, positive_items)
+
+        # Sample negatives
+        if self.use_hard_negatives:
+            # Mix hard and easy negatives
+            num_hard = max(1, int(num_negatives * self.hard_neg_ratio))
+            num_easy = num_negatives - num_hard
+
+            # Hard negatives
+            hard_negs = NegativeSampler.sample_hard_negatives(
+                self.model,
+                playlist_ids,
+                positive_items,
+                num_negatives=num_hard,
+                exclude_items=exclude_items,
+                device=self.device,
+            )
+
+            # Easy negatives (random or popularity-biased)
+            if num_easy > 0:
+                easy_negs = self.negative_sampler.sample(
+                    batch_size, num_easy, exclude_items
+                )
+                easy_negs = torch.LongTensor(easy_negs).to(self.device)
+                negative_items = torch.cat([hard_negs, easy_negs], dim=1)
+            else:
+                negative_items = hard_negs
+        else:
+            # Only easy negatives
+            negative_items = self.negative_sampler.sample(
+                batch_size, num_negatives, exclude_items
+            )
+            negative_items = torch.LongTensor(negative_items).to(self.device)
+
+        # Get negative scores
+        # Reshape for multiple negatives: (batch_size * num_negatives,)
+        playlist_ids_expanded = playlist_ids.unsqueeze(1).expand(-1, num_negatives).reshape(-1)
+        negative_items_flat = negative_items.reshape(-1)
+        neg_scores = self.model.forward(playlist_ids_expanded, negative_items_flat)
+        neg_scores = neg_scores.reshape(batch_size, num_negatives)
+
+        # Compute BPR loss
+        loss = self.criterion(pos_scores, neg_scores)
+
+        # Backward pass
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
+
+    def train_epoch(
+        self,
+        train_data: List[Tuple[int, int, List[int]]],
+        batch_size: int = 256,
+        num_negatives: int = 4,
+    ) -> float:
+        """
+        Train for one epoch.
+
+        Args:
+            train_data: List of (playlist_id, positive_item, exclude_items) tuples
+            batch_size: Batch size
+            num_negatives: Number of negative samples per positive
+
+        Returns:
+            Average loss for the epoch
+        """
+        total_loss = 0
+        num_batches = 0
+
+        # Shuffle training data
+        np.random.shuffle(train_data)
+
+        for i in range(0, len(train_data), batch_size):
+            batch = train_data[i:i + batch_size]
+
+            # Prepare batch
+            playlist_ids = torch.LongTensor([x[0] for x in batch]).to(self.device)
+            positive_items = torch.LongTensor([x[1] for x in batch]).to(self.device)
+            exclude_items = [x[2] for x in batch]
+
+            # Training step
+            loss = self.train_step(playlist_ids, positive_items, exclude_items, num_negatives)
+            total_loss += loss
+            num_batches += 1
+
+        return total_loss / num_batches if num_batches > 0 else 0.0

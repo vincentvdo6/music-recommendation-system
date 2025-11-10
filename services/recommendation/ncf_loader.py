@@ -33,7 +33,8 @@ def load_ncf_model(
             return None
 
         logger.info(f"Loading NCF model from {model_path}")
-        checkpoint = torch.load(model_path, map_location=device)
+        # PyTorch 2.6+ requires weights_only=False for custom objects
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
         # Create model
         model = NeuMF(

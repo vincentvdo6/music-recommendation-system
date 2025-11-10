@@ -22,6 +22,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import numpy as np
 import pandas as pd
 
+from services.recommendation.ranker import FeatureExtractor
+from services.recommendation.audio_similarity import AudioSimilarityEngine
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,9 @@ class RankerTrainingDataGenerator:
         self.audio_sim = audio_sim_engine
         self.min_playlist_length = min_playlist_length
         self.n_negatives = n_negatives_per_positive
+
+        # Create FeatureExtractor with all 23 enhanced features
+        self.feature_extractor = FeatureExtractor(audio_sim_engine)
 
     def generate_training_examples(
         self,
@@ -198,46 +204,18 @@ class RankerTrainingDataGenerator:
         return None
 
     def _extract_features(self, track_data: Dict, profile: Dict) -> Dict:
-        """Extract features for a candidate track."""
-        features = {}
+        """
+        Extract all 23 enhanced features for a candidate track.
 
-        # Item2vec cosine
-        if track_data.get("i2v_embedding") is not None and profile.get("i2v_embedding") is not None:
-            features["i2v_cosine"] = self._cosine_sim(
-                track_data["i2v_embedding"],
-                profile["i2v_embedding"]
-            )
-        else:
-            features["i2v_cosine"] = 0.0
-
-        # Audio similarity (placeholder)
-        features["audio_similarity"] = 0.0
-
-        # Popularity
-        features["popularity"] = track_data.get("popularity", 50) / 100.0
-
-        # Artist match
-        features["artist_in_playlist"] = float(
-            track_data.get("artist", "") in profile.get("artists", set())
+        Uses the FeatureExtractor from services/recommendation/ranker.py
+        which includes cross-features, temporal features, and content features.
+        """
+        # Use the enhanced FeatureExtractor with all 23 features
+        features = self.feature_extractor.extract_features(
+            candidate=track_data,
+            playlist_profile=profile,
+            seed_track=None  # No seed track for playlist continuation task
         )
-
-        # Genre overlap
-        track_genres = set(track_data.get("genres", []))
-        profile_genres = set(profile.get("genres", []))
-        features["genre_jaccard"] = self._jaccard(track_genres, profile_genres)
-
-        # Era gap
-        features["era_gap"] = abs(
-            track_data.get("release_year", 2020) - profile.get("avg_year", 2020)
-        ) / 50.0
-
-        # Seed similarity (set to 0 for playlist task)
-        features["seed_i2v_cosine"] = 0.0
-        features["seed_audio_sim"] = 0.0
-
-        # Valence/energy diff (placeholder)
-        features["valence_diff"] = 0.5
-        features["energy_diff"] = 0.5
 
         return features
 
