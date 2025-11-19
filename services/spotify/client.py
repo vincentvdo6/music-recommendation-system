@@ -12,6 +12,10 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 from cachetools import TTLCache
+from dotenv import load_dotenv
+
+# Ensure .env is loaded before SpotifyClient is instantiated
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,8 @@ class SpotifyClient:
 
         if self.demo_mode:
             logger.warning("Spotify in DEMO mode (no credentials) — images/previews will be empty.")
+        else:
+            logger.info(f"Spotify initialized with credentials (Client ID: {self.client_id[:8]}...)")
 
         # HTTP client and token management
         self._client: Optional[httpx.AsyncClient] = None
@@ -188,7 +194,7 @@ class SpotifyClient:
             return self._fallback_search_results(query, limit)
 
     async def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get audio features for a track with caching."""
+        """Get audio features for a track with caching and retry logic."""
         if self.demo_mode:
             return self._fallback_audio_features()
 
@@ -197,21 +203,46 @@ class SpotifyClient:
         if cached_features is not None:
             return cached_features
 
-        try:
-            resp = await self._request("GET", f"https://api.spotify.com/v1/audio-features/{track_id}")
+        # Retry logic for rate limiting (403/429)
+        max_retries = 3
+        base_delay = 0.5  # Start with 500ms delay
 
-            if resp.status_code == 404:
-                return None  # Track not found
+        for attempt in range(max_retries):
+            try:
+                resp = await self._request("GET", f"https://api.spotify.com/v1/audio-features/{track_id}")
 
-            resp.raise_for_status()
-            features = resp.json()
+                if resp.status_code == 404:
+                    return None  # Track not found
 
-            # Cache the result
-            await self._cache_set(self._features_cache, track_id, features)
-            return features
+                if resp.status_code in [403, 429]:
+                    # Rate limited - wait and retry
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Audio features rate limited (403/429), retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Audio features still rate limited after {max_retries} retries, returning fallback")
+                        return self._fallback_audio_features()
 
-        except httpx.HTTPError:
-            return self._fallback_audio_features()
+                resp.raise_for_status()
+                features = resp.json()
+
+                # Cache the result
+                await self._cache_set(self._features_cache, track_id, features)
+                return features
+
+            except httpx.HTTPError:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"HTTP error fetching audio features: {track_id}")
+                    return self._fallback_audio_features()
+
+        # If we exhausted retries
+        return self._fallback_audio_features()
 
     async def get_tracks_features_bulk(self, track_ids: List[str]) -> Dict[str, Any]:
         """Get audio features for multiple tracks using batch API."""
@@ -236,25 +267,47 @@ class SpotifyClient:
             return features_dict
 
         # Batch fetch uncached features (API supports up to 100 IDs)
+        # Add retry logic for rate limiting
+        max_retries = 3
+        base_delay = 1.0  # Start with 1s delay for bulk requests
+
         try:
             for i in range(0, len(uncached_ids), 100):
                 batch = uncached_ids[i:i + 100]
                 ids_param = ",".join(batch)
 
-                resp = await self._request("GET", "https://api.spotify.com/v1/audio-features",
-                                          params={"ids": ids_param})
+                # Retry loop for this batch
+                for attempt in range(max_retries):
+                    resp = await self._request("GET", "https://api.spotify.com/v1/audio-features",
+                                              params={"ids": ids_param})
 
-                print(f"[DEBUG SPOTIFY] Audio features response status: {resp.status_code}", flush=True)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    print(f"[DEBUG SPOTIFY] Got {len(data.get('audio_features', []))} audio features in response", flush=True)
-                    for features in data.get("audio_features", []):
-                        if features:  # API returns null for tracks without features
-                            track_id = features.get("id")
-                            features_dict[track_id] = features
-                            await self._cache_set(self._features_cache, track_id, features)
-                else:
-                    print(f"[DEBUG SPOTIFY] Non-200 response: {resp.text[:200]}", flush=True)
+                    print(f"[DEBUG SPOTIFY] Audio features response status: {resp.status_code}", flush=True)
+
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        print(f"[DEBUG SPOTIFY] Got {len(data.get('audio_features', []))} audio features in response", flush=True)
+                        for features in data.get("audio_features", []):
+                            if features:  # API returns null for tracks without features
+                                track_id = features.get("id")
+                                features_dict[track_id] = features
+                                await self._cache_set(self._features_cache, track_id, features)
+                        break  # Success - move to next batch
+
+                    elif resp.status_code in [403, 429]:
+                        # Rate limited
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning(f"🔄 Bulk audio features rate limited (403/429), waiting {delay}s before retry {attempt + 2}/{max_retries}...")
+                            print(f"[DEBUG SPOTIFY] Rate limited, retrying in {delay}s...", flush=True)
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            logger.error(f"❌ Bulk audio features still rate limited after {max_retries} retries - this batch failed")
+                            print(f"[DEBUG SPOTIFY] Max retries reached, batch failed", flush=True)
+                            break
+                    else:
+                        print(f"[DEBUG SPOTIFY] Non-200 response: {resp.text[:200]}", flush=True)
+                        break  # Other error - don't retry
 
         except httpx.HTTPError as exc:
             logger.warning("Batch features fetch failed (%s), falling back to individual fetches", exc)

@@ -234,10 +234,11 @@ class MusicService:
             if hasattr(self.context_engine, 'recommend') and callable(getattr(self.context_engine, 'recommend')):
                 # Use HybridRecommendationEngine.recommend() which only needs track IDs
                 playlist_track_ids = list(tracks_map.keys())
-                print(f"[DEBUG] Calling engine.recommend() with {len(playlist_track_ids)} track IDs", flush=True)
+                print(f"[DEBUG] Calling engine.recommend() with {len(playlist_track_ids)} track IDs, seed={seed}", flush=True)
 
                 ml_recommendations = self.context_engine.recommend(
                     playlist_tracks=playlist_track_ids,
+                    seed_track_id=seed,  # Pass seed for mood blending
                     limit=limit * 2  # Get 2x for diversity deduplication
                 )
 
@@ -280,7 +281,7 @@ class MusicService:
                     # Enrich with Spotify metadata
                     enriched = await self._enrich_with_spotify_metadata(ml_recommendations)
                     enriched = await self._ensure_media_assets(enriched)
-                    diverse = self._deduplicate_by_artist(enriched, max_per_artist=2, limit=limit)
+                    diverse = self._deduplicate_by_artist(enriched, max_per_artist=1, limit=limit)  # AGGRESSIVE: Max 1 per artist!
 
                     playlist_info = self._build_playlist_info(
                         total_tracks=len(tracks_map),
@@ -482,21 +483,22 @@ class MusicService:
         logger.info(f"🎵 Artist distribution in candidates: {all_artists}")
 
         for track in tracks:
-            artist = track.get("artist", "Unknown").lower()
+            artist_original = track.get("artist", "Unknown")
+            artist_lower = artist_original.lower()
             track_name = track.get("name", "").lower()
 
             # Skip children's music and blacklisted content
-            if any(keyword in artist for keyword in artist_blacklist_keywords):
+            if any(keyword in artist_lower for keyword in artist_blacklist_keywords):
                 continue
             if any(keyword in track_name for keyword in artist_blacklist_keywords):
                 continue
 
-            artist_display = track.get("artist", "Unknown")
-            count = artist_counts.get(artist_display, 0)
+            # Use lowercase for counting to avoid case sensitivity issues
+            count = artist_counts.get(artist_lower, 0)
 
             if count < max_per_artist:
                 diverse_tracks.append(track)
-                artist_counts[artist_display] = count + 1
+                artist_counts[artist_lower] = count + 1
 
                 if len(diverse_tracks) >= limit:
                     break

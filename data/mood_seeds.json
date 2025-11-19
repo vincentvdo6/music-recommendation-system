@@ -1,0 +1,424 @@
+{
+  "seeds": [
+    {
+      "name": "Ivy",
+      "artist": "Frank Ocean",
+      "spotify_id": "6y0igZArWVvhDzgSG5Dpin",
+      "audio_features": {
+        "valence": 0.18,
+        "energy": 0.32,
+        "acousticness": 0.65,
+        "danceability": 0.42,
+        "tempo": 85,
+        "loudness": -10.5
+      },
+      "mood_tags": ["sad", "melancholic", "intimate", "reflective"]
+    },
+    {
+      "name": "Skinny Love",
+      "artist": "Bon Iver",
+      "spotify_id": "3qiyyUfYe7CRYLucrPmulD",
+      "audio_features": {
+        "valence": 0.15,
+        "energy": 0.28,
+        "acousticness": 0.82,
+        "danceability": 0.35,
+        "tempo": 78,
+        "loudness": -12.0
+      },
+      "mood_tags": ["sad", "melancholic", "acoustic", "emotional"]
+    },
+    {
+      "name": "Someone Like You",
+      "artist": "Adele",
+      "spotify_id": "1zwMYTA5nlNjZxYrvBB2pV",
+      "audio_features": {
+        "valence": 0.22,
+        "energy": 0.35,
+        "acousticness": 0.75,
+        "danceability": 0.38,
+        "tempo": 67,
+        "loudness": -8.5
+      },
+      "mood_tags": ["sad", "emotional", "powerful", "ballad"]
+    },
+    {
+      "name": "The Night We Met",
+      "artist": "Lord Huron",
+      "spotify_id": "0yc6Gst2xkRu0eMLeRMGCX",
+      "audio_features": {
+        "valence": 0.20,
+        "energy": 0.30,
+        "acousticness": 0.70,
+        "danceability": 0.40,
+        "tempo": 110,
+        "loudness": -9.0
+      },
+      "mood_tags": ["sad", "nostalgic", "yearning", "melancholic"]
+    },
+    {
+      "name": "Don't Start Now",
+      "artist": "Dua Lipa",
+      "spotify_id": "6WrI0LAC5M1Rw2MnX2ZvEg",
+      "audio_features": {
+        "valence": 0.75,
+        "energy": 0.85,
+        "acousticness": 0.08,
+        "danceability": 0.79,
+        "tempo": 124,
+        "loudness": -4.5
+      },
+      "mood_tags": ["happy", "upbeat", "energetic", "dance"]
+    },
+    {
+      "name": "Levitating",
+      "artist": "Dua Lipa",
+      "spotify_id": "463CkQjx2Zk1yXoBuierM9",
+      "audio_features": {
+        "valence": 0.82,
+        "energy": 0.82,
+        "acousticness": 0.05,
+        "danceability": 0.70,
+        "tempo": 103,
+        "loudness": -3.8
+      },
+      "mood_tags": ["happy", "upbeat", "fun", "disco"]
+    },
+    {
+      "name": "Good 4 U",
+      "artist": "Olivia Rodrigo",
+      "spotify_id": "4ZtFanR9U6ndgddUvNcjcG",
+      "audio_features": {
+        "valence": 0.56,
+        "energy": 0.90,
+        "acousticness": 0.03,
+        "danceability": 0.56,
+        "tempo": 165,
+        "loudness": -4.2
+      },
+      "mood_tags": ["angry", "energetic", "intense", "rock"]
+    },
+    {
+      "name": "Blinding Lights",
+      "artist": "The Weeknd",
+      "spotify_id": "0VjIjW4GlUZAMYd2vXMi3b",
+      "audio_features": {
+        "valence": 0.68,
+        "energy": 0.73,
+        "acousticness": 0.001,
+        "danceability": 0.51,
+        "tempo": 171,
+        "loudness": -5.9
+      },
+      "mood_tags": ["upbeat", "energetic", "synthpop", "driving"]
+    },
+    {
+      "name": "Sunflower",
+      "artist": "Post Malone",
+      "spotify_id": "0RiRZpuVRbi7oqRdSMwhQY",
+      "audio_features": {
+        "valence": 0.76,
+        "energy": 0.48,
+        "acousticness": 0.07,
+        "danceability": 0.76,
+        "tempo": 90,
+        "loudness": -6.8
+      },
+      "mood_tags": ["happy", "chill", "mellow", "groovy"]
+    },
+    {
+      "name": "Lovely",
+      "artist": "Billie Eilish",
+      "spotify_id": "0u2P5u6lvoDfwTYjAADbn4",
+      "audio_features": {
+        "valence": 0.12,
+        "energy": 0.30,
+        "acousticness": 0.92,
+        "danceability": 0.35,
+        "tempo": 115,
+        "loudness": -13.5
+      },
+      "mood_tags": ["sad", "dark", "haunting", "minimal"]
+    },
+    {
+      "name": "Happier Than Ever",
+      "artist": "Billie Eilish",
+      "spotify_id": "4RVnAU35WRWra6OZ3CbbMA",
+      "audio_features": {
+        "valence": 0.25,
+        "energy": 0.42,
+        "acousticness": 0.55,
+        "danceability": 0.38,
+        "tempo": 140,
+        "loudness": -7.8
+      },
+      "mood_tags": ["melancholic", "building", "emotional", "complex"]
+    },
+    {
+      "name": "Drivers License",
+      "artist": "Olivia Rodrigo",
+      "spotify_id": "7lPN2DXiMsVn7XUKtOW1CS",
+      "audio_features": {
+        "valence": 0.28,
+        "energy": 0.42,
+        "acousticness": 0.18,
+        "danceability": 0.58,
+        "tempo": 144,
+        "loudness": -6.5
+      },
+      "mood_tags": ["sad", "heartbreak", "dramatic", "ballad"]
+    },
+    {
+      "name": "Watermelon Sugar",
+      "artist": "Harry Styles",
+      "spotify_id": "6UelLqGlWMcVH1E5c4H7lY",
+      "audio_features": {
+        "valence": 0.83,
+        "energy": 0.82,
+        "acousticness": 0.12,
+        "danceability": 0.55,
+        "tempo": 95,
+        "loudness": -4.2
+      },
+      "mood_tags": ["happy", "summer", "upbeat", "groovy"]
+    },
+    {
+      "name": "Stay",
+      "artist": "The Kid LAROI",
+      "spotify_id": "5PjdY0CKGZdEuoNab3yDmX",
+      "audio_features": {
+        "valence": 0.48,
+        "energy": 0.70,
+        "acousticness": 0.05,
+        "danceability": 0.59,
+        "tempo": 169,
+        "loudness": -5.0
+      },
+      "mood_tags": ["emotional", "energetic", "pop", "longing"]
+    },
+    {
+      "name": "Heat Waves",
+      "artist": "Glass Animals",
+      "spotify_id": "02MWAaffLxlfxAUY7c5dvx",
+      "audio_features": {
+        "valence": 0.55,
+        "energy": 0.76,
+        "acousticness": 0.11,
+        "danceability": 0.76,
+        "tempo": 130,
+        "loudness": -6.7
+      },
+      "mood_tags": ["mellow", "groovy", "dreamy", "nostalgic"]
+    },
+    {
+      "name": "Lose Yourself",
+      "artist": "Eminem",
+      "spotify_id": "5Z01UMMf7V1o0MzF86s6WJ",
+      "audio_features": {
+        "valence": 0.38,
+        "energy": 0.88,
+        "acousticness": 0.04,
+        "danceability": 0.74,
+        "tempo": 171,
+        "loudness": -5.5
+      },
+      "mood_tags": ["intense", "aggressive", "motivational", "powerful"]
+    },
+    {
+      "name": "Clair de Lune",
+      "artist": "Claude Debussy",
+      "spotify_id": "1prBFGIbOaiOITSKYytraK",
+      "audio_features": {
+        "valence": 0.08,
+        "energy": 0.05,
+        "acousticness": 0.99,
+        "danceability": 0.18,
+        "tempo": 60,
+        "loudness": -28.0
+      },
+      "mood_tags": ["calm", "peaceful", "classical", "serene"]
+    },
+    {
+      "name": "Mr. Brightside",
+      "artist": "The Killers",
+      "spotify_id": "7oK9VyNzrYvRFo7nQEYkWN",
+      "audio_features": {
+        "valence": 0.45,
+        "energy": 0.92,
+        "acousticness": 0.002,
+        "danceability": 0.35,
+        "tempo": 148,
+        "loudness": -4.8
+      },
+      "mood_tags": ["energetic", "rock", "anthemic", "bittersweet"]
+    },
+    {
+      "name": "Strawberry Fields Forever",
+      "artist": "The Beatles",
+      "spotify_id": "3Am0IbOxmvlSXro7N5iSfZ",
+      "audio_features": {
+        "valence": 0.40,
+        "energy": 0.55,
+        "acousticness": 0.28,
+        "danceability": 0.42,
+        "tempo": 106,
+        "loudness": -10.2
+      },
+      "mood_tags": ["psychedelic", "dreamy", "nostalgic", "experimental"]
+    },
+    {
+      "name": "Bohemian Rhapsody",
+      "artist": "Queen",
+      "spotify_id": "4u7EnebtmKWzUH433cf5Qv",
+      "audio_features": {
+        "valence": 0.38,
+        "energy": 0.42,
+        "acousticness": 0.21,
+        "danceability": 0.33,
+        "tempo": 72,
+        "loudness": -10.5
+      },
+      "mood_tags": ["dramatic", "theatrical", "complex", "epic"]
+    },
+    {
+      "name": "Smooth",
+      "artist": "Santana",
+      "spotify_id": "6f0kbOrClcversZvUDSb8f",
+      "audio_features": {
+        "valence": 0.72,
+        "energy": 0.68,
+        "acousticness": 0.02,
+        "danceability": 0.65,
+        "tempo": 114,
+        "loudness": -6.0
+      },
+      "mood_tags": ["smooth", "latin", "groovy", "sultry"]
+    },
+    {
+      "name": "Take Five",
+      "artist": "Dave Brubeck",
+      "spotify_id": "2N7jfNJJw8HfH0N45L7CW4",
+      "audio_features": {
+        "valence": 0.65,
+        "energy": 0.38,
+        "acousticness": 0.75,
+        "danceability": 0.48,
+        "tempo": 174,
+        "loudness": -12.0
+      },
+      "mood_tags": ["jazzy", "cool", "sophisticated", "relaxed"]
+    },
+    {
+      "name": "September",
+      "artist": "Earth, Wind & Fire",
+      "spotify_id": "5nNmj1cLQ3W3gCGqr8E2AL",
+      "audio_features": {
+        "valence": 0.96,
+        "energy": 0.85,
+        "acousticness": 0.09,
+        "danceability": 0.75,
+        "tempo": 126,
+        "loudness": -9.2
+      },
+      "mood_tags": ["joyful", "celebratory", "funk", "disco"]
+    },
+    {
+      "name": "Ain't No Sunshine",
+      "artist": "Bill Withers",
+      "spotify_id": "6kbFyEolQiZbabEzJB9f0l",
+      "audio_features": {
+        "valence": 0.25,
+        "energy": 0.40,
+        "acousticness": 0.62,
+        "danceability": 0.55,
+        "tempo": 98,
+        "loudness": -11.5
+      },
+      "mood_tags": ["sad", "soulful", "bluesy", "yearning"]
+    },
+    {
+      "name": "Electric Feel",
+      "artist": "MGMT",
+      "spotify_id": "3FtYbEfBqAlGO46NUDQSAt",
+      "audio_features": {
+        "valence": 0.68,
+        "energy": 0.78,
+        "acousticness": 0.01,
+        "danceability": 0.66,
+        "tempo": 107,
+        "loudness": -6.8
+      },
+      "mood_tags": ["psychedelic", "groovy", "electronic", "playful"]
+    },
+    {
+      "name": "Redbone",
+      "artist": "Childish Gambino",
+      "spotify_id": "0wXuerDYiBnERgIpbb3JBR",
+      "audio_features": {
+        "valence": 0.42,
+        "energy": 0.52,
+        "acousticness": 0.03,
+        "danceability": 0.72,
+        "tempo": 160,
+        "loudness": -9.5
+      },
+      "mood_tags": ["smooth", "funky", "sultry", "groovy"]
+    },
+    {
+      "name": "Bittersweet Symphony",
+      "artist": "The Verve",
+      "spotify_id": "57iDDD9N9tTWe75x6qhStw",
+      "audio_features": {
+        "valence": 0.32,
+        "energy": 0.62,
+        "acousticness": 0.05,
+        "danceability": 0.45,
+        "tempo": 85,
+        "loudness": -7.2
+      },
+      "mood_tags": ["melancholic", "epic", "orchestral", "bittersweet"]
+    },
+    {
+      "name": "Three Little Birds",
+      "artist": "Bob Marley",
+      "spotify_id": "2qdD4yFJsPPe3aSYHuVFfh",
+      "audio_features": {
+        "valence": 0.88,
+        "energy": 0.62,
+        "acousticness": 0.35,
+        "danceability": 0.75,
+        "tempo": 76,
+        "loudness": -8.5
+      },
+      "mood_tags": ["happy", "uplifting", "reggae", "positive"]
+    },
+    {
+      "name": "Dreams",
+      "artist": "Fleetwood Mac",
+      "spotify_id": "0ofHAoxe9vBkTCp2UQIavz",
+      "audio_features": {
+        "valence": 0.50,
+        "energy": 0.55,
+        "acousticness": 0.02,
+        "danceability": 0.58,
+        "tempo": 122,
+        "loudness": -10.8
+      },
+      "mood_tags": ["dreamy", "nostalgic", "mellow", "classic"]
+    },
+    {
+      "name": "Midnight City",
+      "artist": "M83",
+      "spotify_id": "0yc6Gst2xkRu0eMLeRMGCX",
+      "audio_features": {
+        "valence": 0.55,
+        "energy": 0.78,
+        "acousticness": 0.001,
+        "danceability": 0.60,
+        "tempo": 105,
+        "loudness": -5.8
+      },
+      "mood_tags": ["euphoric", "synth", "uplifting", "atmospheric"]
+    }
+  ]
+}

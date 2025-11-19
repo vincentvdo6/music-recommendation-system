@@ -92,6 +92,21 @@ class ContextualRecommendationEngine:
         "motivated": "energetic",
     }
 
+    MOOD_GENRE_ADJACENCIES = {
+        "upbeat": ["pop", "dance", "synthpop"],
+        "energetic": ["rock", "hip-hop", "electronic"],
+        "calm": ["ambient", "acoustic", "modern classical"],
+        "melancholic": ["indie", "folk", "acoustic", "lofi", "r&b", "neo-soul"],
+        "dreamy": ["dream pop", "indietronica", "synthwave"],
+        "romantic": ["r&b", "neo-soul", "pop"],
+        "intense": ["rock", "industrial", "drum_and_bass"],
+        "nostalgic": ["synthwave", "surf", "folk"],
+        "chill": ["lofi", "chillhop", "ambient"],
+        "hopeful": ["indie", "pop", "folk"],
+        "moody": ["dark pop", "electronic", "industrial"],
+        "sensual": ["r&b", "neo-soul", "electropop"],
+    }
+
     ACTIVITY_ALIASES = {
         "studying": "study",
         "study": "study",
@@ -455,6 +470,26 @@ class ContextualRecommendationEngine:
         result = {key: features[key] / weights[key] for key in features if weights[key] > 0}
         return result
 
+    def _expand_adjacent_genres(self, moods: Iterable[str], existing_genres: Iterable[str]) -> List[str]:
+        """Derive genre hints from the requested moods without overriding explicit genre picks."""
+
+        expanded: List[str] = []
+        seen: Set[str] = set()
+        base = {_canonical(genre) for genre in existing_genres if genre}
+
+        for mood in moods or []:
+            for genre in self.MOOD_GENRE_ADJACENCIES.get(mood, []):
+                canonical = self.GENRE_ALIASES.get(_canonical(genre), _canonical(genre))
+                if not canonical:
+                    continue
+                canonical_key = _canonical(canonical)
+                if canonical_key in base or canonical in seen:
+                    continue
+                expanded.append(canonical)
+                seen.add(canonical)
+
+        return expanded
+
     def _normalise_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Normalise raw context dictionary into canonical categories."""
 
@@ -467,6 +502,7 @@ class ContextualRecommendationEngine:
             "tempo": None,
             "era": None,
             "regions": [],
+            "adjacent_genres": [],
         }
 
         moods = context.get("moods") or context.get("mood")
@@ -493,6 +529,10 @@ class ContextualRecommendationEngine:
             for genre in genres:
                 canonical = self.GENRE_ALIASES.get(_canonical(genre), _canonical(genre))
                 normalised["genres"].append(canonical)
+
+        adjacent_genres = self._expand_adjacent_genres(normalised["moods"], normalised["genres"])
+        if adjacent_genres:
+            normalised["adjacent_genres"] = adjacent_genres
 
         tod = context.get("time_of_day") or context.get("time")
         if isinstance(tod, str):
@@ -708,6 +748,11 @@ class ContextualRecommendationEngine:
         if genres:
             weight += 0.7
             score += self._tag_score(tags.get("genres", []), genres)
+
+        adjacent_genres = context.get("adjacent_genres")
+        if adjacent_genres:
+            weight += 0.4
+            score += self._tag_score(tags.get("genres", []), adjacent_genres, fuzz=True)
 
         regions = context.get("regions")
         if regions:

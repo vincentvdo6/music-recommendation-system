@@ -339,26 +339,29 @@ class SimpleRanker:
     """
 
     DEFAULT_WEIGHTS = {
-        # Core signals
-        "i2v_cosine": 0.20,
-        "audio_similarity": 0.18,
-        "seed_i2v_cosine": 0.08,
+        # MOOD FILTERING (HIGHEST PRIORITY!)
+        "mood_similarity": 0.35,  # Direct mood match - most important!
 
-        # Cross features (interaction terms - high value!)
-        "i2v_x_audio": 0.15,  # Strong combined signal
-        "popularity_x_genre_match": 0.08,  # Popular within user's taste
+        # Core signals
+        "i2v_cosine": 0.15,  # Reduced to make room for mood
+        "audio_similarity": 0.12,  # Reduced
+        "seed_i2v_cosine": 0.06,  # Reduced
+
+        # Cross features (interaction terms)
+        "i2v_x_audio": 0.10,  # Reduced
+        "popularity_x_genre_match": 0.06,  # Reduced
 
         # Content features
-        "genre_jaccard": 0.07,
-        "mood_stability": 0.06,
-        "tempo_match": 0.04,
+        "genre_jaccard": 0.05,
+        "mood_stability": 0.04,
+        "tempo_match": 0.03,
 
         # Temporal features
-        "decade_match": 0.05,
-        "recency_score": 0.03,
+        "decade_match": 0.03,
+        "recency_score": 0.02,
 
-        # Popularity (reduced weight, now also in cross feature)
-        "popularity": 0.06,
+        # Popularity (lowest priority)
+        "popularity": 0.04,
     }
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):
@@ -391,6 +394,10 @@ class SimpleRanker:
             feats = feature_extractor.extract_features(
                 candidate, playlist_profile, seed_track
             )
+
+            # Add mood_similarity if already computed in candidate
+            if 'mood_similarity' in candidate:
+                feats['mood_similarity'] = candidate['mood_similarity']
 
             # Weighted sum
             score = sum(

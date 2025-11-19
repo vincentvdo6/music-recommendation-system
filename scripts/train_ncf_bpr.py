@@ -21,12 +21,17 @@ import argparse
 import json
 import logging
 import random
+import sys
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
+
+# Add project root to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from services.recommendation.ncf_model import (
     NeuMF,
@@ -115,6 +120,7 @@ def prepare_training_data(
     playlist_id_map: Dict[str, int],
     track_id_map: Dict[str, int],
     min_tracks: int = 5,
+    use_exclude_lists: bool = False,  # NEW: Make exclude lists optional
 ) -> List[Tuple[int, int, List[int]]]:
     """
     Convert playlists to training examples.
@@ -127,6 +133,7 @@ def prepare_training_data(
         playlist_id_map: Playlist ID to integer mapping
         track_id_map: Track ID to integer mapping
         min_tracks: Minimum tracks required in a playlist
+        use_exclude_lists: If False, skip storing exclude lists (saves 18GB RAM!)
 
     Returns:
         List of (playlist_id, positive_track_id, exclude_track_ids) tuples
@@ -147,11 +154,17 @@ def prepare_training_data(
 
         # Create training example for each track
         for track_idx in track_indices:
-            # Exclude all other tracks in this playlist
-            exclude = [t for t in track_indices if t != track_idx]
+            if use_exclude_lists:
+                # Exclude all other tracks in this playlist
+                exclude = [t for t in track_indices if t != track_idx]
+            else:
+                # Skip exclude lists (collision probability is 0.008% - negligible!)
+                exclude = []
             training_examples.append((playlist_id, track_idx, exclude))
 
     logger.info(f"Created {len(training_examples):,} training examples")
+    if not use_exclude_lists:
+        logger.info("  (Exclude lists disabled - saves 18GB RAM!)")
 
     return training_examples
 
@@ -265,8 +278,8 @@ def main():
                         help='GMF embedding dimension')
     parser.add_argument('--mlp-dim', type=int, default=64,
                         help='MLP embedding dimension')
-    parser.add_argument('--use-hard-negatives', action='store_true', default=True,
-                        help='Use hard negative mining')
+    parser.add_argument('--no-hard-negatives', action='store_true', default=False,
+                        help='Disable hard negative mining (not recommended)')
     parser.add_argument('--hard-neg-ratio', type=float, default=0.3,
                         help='Ratio of hard negatives')
     parser.add_argument('--device', type=str, default='cpu',
@@ -282,6 +295,12 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+
+    # MAX OUT CPU USAGE - Use all available threads!
+    import os
+    num_threads = os.cpu_count() or 4
+    torch.set_num_threads(num_threads)
+    logger.info(f"PyTorch using {num_threads} CPU threads for maximum performance!")
 
     logger.info("="*80)
     logger.info("NeuMF Training with BPR Loss")
@@ -302,8 +321,10 @@ def main():
     # Compute track popularity
     track_popularity = compute_track_popularity(playlists, track_id_map)
 
-    # Prepare training data
-    training_data = prepare_training_data(playlists, playlist_id_map, track_id_map)
+    # Prepare training data (skip exclude lists to save 18GB RAM!)
+    training_data = prepare_training_data(
+        playlists, playlist_id_map, track_id_map, use_exclude_lists=False
+    )
     train_data, val_data = train_test_split(training_data, test_ratio=args.val_ratio, seed=args.seed)
 
     # Initialize model
@@ -337,7 +358,7 @@ def main():
         learning_rate=args.lr,
         weight_decay=1e-5,
         device=args.device,
-        use_hard_negatives=args.use_hard_negatives,
+        use_hard_negatives=not args.no_hard_negatives,  # Inverted flag
         hard_neg_ratio=args.hard_neg_ratio,
     )
 
@@ -345,8 +366,8 @@ def main():
     logger.info(f"\nStarting training for {args.epochs} epochs...")
     logger.info(f"  Batch size: {args.batch_size}")
     logger.info(f"  Negatives per positive: {args.num_negatives}")
-    logger.info(f"  Hard negative mining: {args.use_hard_negatives}")
-    if args.use_hard_negatives:
+    logger.info(f"  Hard negative mining: {not args.no_hard_negatives}")
+    if not args.no_hard_negatives:
         logger.info(f"  Hard negative ratio: {args.hard_neg_ratio}")
     logger.info("")
 

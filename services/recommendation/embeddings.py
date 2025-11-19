@@ -166,13 +166,15 @@ class ANNIndex:
     def save(self, path: str):
         """Save index to disk."""
         import json
+        import os
 
         output_path = Path(path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Save Annoy index
+        # Save Annoy index - use absolute path for Windows compatibility
         index_path = output_path / "annoy.index"
-        self.index.save(str(index_path))
+        abs_index_path = os.path.abspath(str(index_path))
+        self.index.save(abs_index_path)
         logger.info(f"Saved Annoy index to {index_path}")
 
         # Save ID mapping

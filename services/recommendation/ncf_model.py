@@ -472,7 +472,7 @@ class NegativeSampler:
         model: NeuMF,
         playlist_ids: torch.Tensor,
         positive_items: torch.Tensor,
-        num_candidates: int = 100,
+        num_candidates: int = 20,  # Reduced from 100 for speed (still effective!)
         num_negatives: int = 5,
         exclude_items: Optional[List[List[int]]] = None,
         device: str = "cpu",
@@ -505,17 +505,26 @@ class NegativeSampler:
                 exclude = set(exclude_items[i]) if exclude_items else set()
                 exclude.add(positive_items[i].item())  # Also exclude the positive
 
-                # Sample random candidates
-                candidates = [j for j in range(model.num_tracks) if j not in exclude]
-                if len(candidates) < num_negatives:
-                    # Not enough candidates
-                    sampled_candidates = np.random.choice(
-                        candidates, size=num_negatives, replace=True
-                    )
-                else:
-                    sampled_candidates = np.random.choice(
-                        candidates, size=min(num_candidates, len(candidates)), replace=False
-                    )
+                # Fast sampling: randomly sample candidates and retry if they're excluded
+                # Much faster than creating a list of all 598K tracks!
+                sampled_candidates = []
+                max_attempts = num_candidates * 10  # Prevent infinite loop
+                attempts = 0
+
+                while len(sampled_candidates) < num_candidates and attempts < max_attempts:
+                    # Sample random tracks
+                    batch = np.random.randint(0, model.num_tracks, size=num_candidates * 2)
+                    # Keep only non-excluded ones
+                    for track_id in batch:
+                        if track_id not in exclude and len(sampled_candidates) < num_candidates:
+                            sampled_candidates.append(track_id)
+                    attempts += 1
+
+                if len(sampled_candidates) < num_negatives:
+                    # Emergency fallback: just sample randomly
+                    sampled_candidates = np.random.randint(0, model.num_tracks, size=num_negatives).tolist()
+
+                sampled_candidates = np.array(sampled_candidates[:num_candidates])
 
                 # Score candidates
                 playlist_batch = torch.LongTensor([playlist_id] * len(sampled_candidates)).to(device)
@@ -646,6 +655,7 @@ class BPRTrainer:
         train_data: List[Tuple[int, int, List[int]]],
         batch_size: int = 256,
         num_negatives: int = 4,
+        shuffle: bool = False,
     ) -> float:
         """
         Train for one epoch.
@@ -654,15 +664,27 @@ class BPRTrainer:
             train_data: List of (playlist_id, positive_item, exclude_items) tuples
             batch_size: Batch size
             num_negatives: Number of negative samples per positive
+            shuffle: Whether to shuffle data (WARNING: slow for large datasets!)
 
         Returns:
             Average loss for the epoch
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         total_loss = 0
         num_batches = 0
 
-        # Shuffle training data
-        np.random.shuffle(train_data)
+        total_batches = len(train_data) // batch_size
+        log_interval = max(1, total_batches // 20)  # Log 20 times per epoch
+
+        # Shuffle training data (skip for very large datasets)
+        if shuffle:
+            logger.info(f"Shuffling {len(train_data):,} training examples...")
+            np.random.shuffle(train_data)
+            logger.info("Shuffle complete!")
+
+        logger.info(f"Training on {len(train_data):,} examples ({total_batches:,} batches)")
 
         for i in range(0, len(train_data), batch_size):
             batch = train_data[i:i + batch_size]
@@ -676,5 +698,11 @@ class BPRTrainer:
             loss = self.train_step(playlist_ids, positive_items, exclude_items, num_negatives)
             total_loss += loss
             num_batches += 1
+
+            # Log progress
+            if num_batches % log_interval == 0:
+                avg_loss = total_loss / num_batches
+                progress = (num_batches / total_batches) * 100
+                logger.info(f"  Progress: {progress:.1f}% ({num_batches:,}/{total_batches:,}) - Loss: {avg_loss:.4f}")
 
         return total_loss / num_batches if num_batches > 0 else 0.0

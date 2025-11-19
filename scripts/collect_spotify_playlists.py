@@ -383,7 +383,7 @@ async def main():
         logger.info("\n" + "=" * 60)
         logger.info("Saving collected playlists...")
         logger.info("=" * 60)
-        collector.save_playlists(output_dir="data/smpd/raw")
+        collector.save_playlists(output_dir="data/smpd/raw_new")  # Save to new dir!
 
         logger.info("\n" + "=" * 60)
         logger.info(f"✓ Collection complete!")

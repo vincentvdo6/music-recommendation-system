@@ -53,3 +53,28 @@ def test_playlist_personalisation_excludes_original_tracks() -> None:
         for track in recommendations
     }
     assert playlist_pairs.isdisjoint(recommended_pairs), "Playlist songs should not be repeated in recommendations"
+
+
+def test_context_normalisation_adds_adjacent_genres_from_moods() -> None:
+    catalogue = TrackCatalogue()
+    engine = ContextualRecommendationEngine(catalogue)
+
+    normalised = engine._normalise_context({"moods": ["melancholic"]})
+
+    assert normalised["adjacent_genres"], "Moods should expand into adjacent genres"
+    assert "indie" in normalised["adjacent_genres"], "Melancholic mood should include indie-leaning genres"
+
+
+def test_adjacent_genres_boost_context_alignment() -> None:
+    catalogue = TrackCatalogue()
+    engine = ContextualRecommendationEngine(catalogue)
+
+    context = engine._normalise_context({"moods": ["melancholic"]})
+
+    candidate_adjacent = {"tags": {"moods": [], "genres": ["indie"]}}
+    candidate_unrelated = {"tags": {"moods": [], "genres": ["dance"]}}
+
+    adjacent_score = engine._context_alignment(candidate_adjacent, context, None)
+    unrelated_score = engine._context_alignment(candidate_unrelated, context, None)
+
+    assert adjacent_score > unrelated_score, "Adjacent genres should provide a higher context score even without mood tags"

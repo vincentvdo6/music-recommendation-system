@@ -23,13 +23,13 @@ class Item2VecTrainer:
 
     def __init__(
         self,
-        vector_size: int = 100,
+        vector_size: int = 200,  # Optimal for SMPD (1M playlists)
         window: int = 50,  # Large window for playlists (unordered sets)
-        min_count: int = 2,  # Filter rare tracks (adjusted for small dataset)
+        min_count: int = 5,  # Filter very rare tracks (appear in <5 playlists)
         sg: int = 1,  # Skip-gram (not CBOW)
-        negative: int = 20,  # Negative sampling
-        workers: int = 8,
-        epochs: int = 10,
+        negative: int = 30,  # More negative sampling for SMPD scale
+        workers: int = 16,  # More parallel workers for faster training
+        epochs: int = 10,  # Sufficient with 1M playlists
     ):
         self.vector_size = vector_size
         self.window = window
@@ -141,13 +141,14 @@ def main():
         logger.info("Please run scripts/download_smpd.py first to preprocess the dataset")
         return
 
-    # Train
+    # Train - Optimized for SMPD (1M playlists)
     trainer = Item2VecTrainer(
-        vector_size=100,
+        vector_size=200,  # Even richer embeddings with SMPD data!
         window=50,
-        min_count=2,
-        epochs=10,
-        workers=8,
+        min_count=5,  # With 1M playlists, filter out very rare tracks
+        epochs=10,  # Less epochs needed with massive dataset
+        workers=16,  # Use more CPU cores for faster training
+        negative=30,  # More negative sampling for better quality
     )
 
     playlists = trainer.load_playlists(playlist_file)

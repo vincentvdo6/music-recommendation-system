@@ -28,6 +28,7 @@ class EngineFactory:
         ann_index_path: str = "models/item2vec/ann_index",
         ranker_path: str = "models/ranker/lightgbm_ranker.txt",
         ncf_path: str = "models/ncf/neumf_bpr_best.pt",
+        mood_predictor_path: str = "models/mood_predictor/mood_predictor.pkl",
         use_mmr: bool = True,
     ):
         """
@@ -39,6 +40,7 @@ class EngineFactory:
             ann_index_path: Path to ANN index
             ranker_path: Path to learned ranker
             ncf_path: Path to NCF model checkpoint
+            mood_predictor_path: Path to mood predictor model
             use_mmr: Use MMR diversity reranking
 
         Returns:
@@ -96,12 +98,16 @@ class EngineFactory:
         # Determine if we should use MMR
         use_mmr_final = use_mmr and (embedding_service is not None)
 
+        # Check mood predictor availability
+        mood_predictor_available = Path(mood_predictor_path).exists()
+
         # Create hybrid engine
         if embedding_service or ranker or ncf_recommender:
             logger.info("Creating HybridRecommendationEngine")
             logger.info(f"  - Embeddings (item2vec): {'✓' if embedding_service else '✗'}")
             logger.info(f"  - Learned ranker: {'✓' if ranker else '✗'}")
             logger.info(f"  - NCF (deep learning): {'✓' if ncf_recommender else '✗'}")
+            logger.info(f"  - Mood predictor: {'✓' if mood_predictor_available else '✗'}")
             logger.info(f"  - MMR diversity: {'✓' if use_mmr_final else '✗'}")
 
             return HybridRecommendationEngine(
@@ -110,6 +116,7 @@ class EngineFactory:
                 ranker=ranker,
                 ncf_recommender=ncf_recommender,
                 use_mmr=use_mmr_final,
+                mood_predictor_path=mood_predictor_path if mood_predictor_available else None,
             )
         else:
             logger.info("No models found, using baseline ContextualRecommendationEngine")
