@@ -1,27 +1,27 @@
 """FastAPI application for music recommendation system."""
 
+import logging
+import logging.config
 import os
 import time
 import uuid
-import logging
-import logging.config
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, ORJSONResponse, PlainTextResponse
-from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
-from api.routers import search
-from services.spotify.client import SpotifyClient
-from services.music.service import MusicService
 from api.models import HealthResponse
+from api.routers import search
+from services.music.service import MusicService
+from services.spotify.client import SpotifyClient
 
 # Configure logging with a clean, compact format
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -86,7 +86,6 @@ async def lifespan(app: FastAPI):
     finally:
         # Clean shutdown
         logger.info("Shutting down Music Recommendation API")
-        app.state.music.save_recommendation_state()
         await app.state.music.close()
 
 
@@ -119,7 +118,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[allowed_origin] if allowed_origin else ["*"],
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -143,15 +142,16 @@ async def security_headers(request: Request, call_next):
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["X-Request-ID"] = rid
 
-    # Content Security Policy (temporary inline allowed for existing script)
+    # Strict CSP: all scripts/styles/fonts are self-hosted static files.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' https: data: *.scdn.co i.scdn.co *.spotifycdn.com *.mzstatic.com; "
-        "media-src 'self' https: p.scdn.co *.scdn.co *.spotifycdn.com audio-ssl.itunes.apple.com; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' https: data:; "
+        "media-src 'self' https:; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "font-src 'self'; "
         "connect-src 'self'; "
-        "frame-src https: open.spotify.com;"
+        "frame-src https://open.spotify.com;"
     )
 
     return response
@@ -202,20 +202,5 @@ async def root():
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
-
-
-@app.get("/api")
-async def api_info():
-    """API information endpoint."""
-    return {
-        "name": "Music Recommendation API",
-        "version": "0.1.0",
-        "description": "Music recommendation system powered by Spotify Web API",
-        "endpoints": {
-            "search": "/api/v1/search",
-            "recommendations": "/api/v1/recommendations",
-            "health": "/health"
-        }
-    }
 
 

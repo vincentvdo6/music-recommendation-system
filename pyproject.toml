@@ -1,0 +1,23 @@
+[project]
+name = "one-rec"
+version = "1.0.0"
+description = "Hybrid music recommendation engine: item2vec retrieval + LambdaRank ranking over 597K tracks"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "slow: tests that load real model artifacts from models/ (deselect with '-m \"not slow\"')",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# The Kaggle notebook is generated cell code with its own terse style.
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

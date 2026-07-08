@@ -6,10 +6,10 @@ Implements fast nearest neighbor search using Annoy.
 """
 
 import logging
-import numpy as np
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 from gensim.models import KeyedVectors
 
 logger = logging.getLogger(__name__)

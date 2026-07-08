@@ -8,7 +8,7 @@ import os
 import random
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 import httpx
 from cachetools import TTLCache
@@ -44,8 +44,6 @@ class SpotifyClient:
 
         # Caching with thread-safe TTL cache
         self._search_cache = TTLCache(maxsize=2000, ttl=300)  # 2k searches, 5min
-        self._features_cache = TTLCache(maxsize=10000, ttl=7200)  # 10k features, 2hrs
-        self._artist_cache = TTLCache(maxsize=5000, ttl=86400)  # Artist metadata, 24hrs
         self._cache_lock = asyncio.Lock()
 
         # Rate limiting
@@ -93,7 +91,8 @@ class SpotifyClient:
             if self._access_token and self._token_expiry and self._token_expiry > datetime.utcnow():
                 return self._access_token
 
-            assert self._client, "Call start() before using the client"
+            if not self._client:
+                raise RuntimeError("HTTP client not initialized. Call start() before using the client")
 
             creds = f"{self.client_id}:{self.client_secret}".encode()
             b64 = base64.b64encode(creds).decode()
@@ -129,7 +128,8 @@ class SpotifyClient:
 
     async def _request(self, method: str, url: str, *, params=None) -> httpx.Response:
         """Make a request with retry logic and rate limiting."""
-        assert self._client, "Call start() before using the client"
+        if not self._client:
+            raise RuntimeError("HTTP client not initialized. Call start() before using the client")
 
         async with self._sem:  # Rate limiting
             token = await self._get_access_token()
@@ -192,253 +192,6 @@ class SpotifyClient:
         except httpx.HTTPError:
             # Graceful degradation to fallback
             return self._fallback_search_results(query, limit)
-
-    async def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get audio features for a track with caching and retry logic."""
-        if self.demo_mode:
-            return self._fallback_audio_features()
-
-        # Check cache first
-        cached_features = await self._cache_get(self._features_cache, track_id)
-        if cached_features is not None:
-            return cached_features
-
-        # Retry logic for rate limiting (403/429)
-        max_retries = 3
-        base_delay = 0.5  # Start with 500ms delay
-
-        for attempt in range(max_retries):
-            try:
-                resp = await self._request("GET", f"https://api.spotify.com/v1/audio-features/{track_id}")
-
-                if resp.status_code == 404:
-                    return None  # Track not found
-
-                if resp.status_code in [403, 429]:
-                    # Rate limited - wait and retry
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)  # Exponential backoff
-                        logger.warning(f"Audio features rate limited (403/429), retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        logger.error(f"Audio features still rate limited after {max_retries} retries, returning fallback")
-                        return self._fallback_audio_features()
-
-                resp.raise_for_status()
-                features = resp.json()
-
-                # Cache the result
-                await self._cache_set(self._features_cache, track_id, features)
-                return features
-
-            except httpx.HTTPError:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    await asyncio.sleep(delay)
-                    continue
-                else:
-                    logger.error(f"HTTP error fetching audio features: {track_id}")
-                    return self._fallback_audio_features()
-
-        # If we exhausted retries
-        return self._fallback_audio_features()
-
-    async def get_tracks_features_bulk(self, track_ids: List[str]) -> Dict[str, Any]:
-        """Get audio features for multiple tracks using batch API."""
-        if self.demo_mode:
-            return {track_id: self._fallback_audio_features() for track_id in track_ids}
-
-        if not track_ids:
-            return {}
-
-        features_dict = {}
-
-        # Check cache first
-        uncached_ids = []
-        for track_id in track_ids:
-            cached = await self._cache_get(self._features_cache, track_id)
-            if cached is not None:
-                features_dict[track_id] = cached
-            else:
-                uncached_ids.append(track_id)
-
-        if not uncached_ids:
-            return features_dict
-
-        # Batch fetch uncached features (API supports up to 100 IDs)
-        # Add retry logic for rate limiting
-        max_retries = 3
-        base_delay = 1.0  # Start with 1s delay for bulk requests
-
-        try:
-            for i in range(0, len(uncached_ids), 100):
-                batch = uncached_ids[i:i + 100]
-                ids_param = ",".join(batch)
-
-                # Retry loop for this batch
-                for attempt in range(max_retries):
-                    resp = await self._request("GET", "https://api.spotify.com/v1/audio-features",
-                                              params={"ids": ids_param})
-
-                    print(f"[DEBUG SPOTIFY] Audio features response status: {resp.status_code}", flush=True)
-
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        print(f"[DEBUG SPOTIFY] Got {len(data.get('audio_features', []))} audio features in response", flush=True)
-                        for features in data.get("audio_features", []):
-                            if features:  # API returns null for tracks without features
-                                track_id = features.get("id")
-                                features_dict[track_id] = features
-                                await self._cache_set(self._features_cache, track_id, features)
-                        break  # Success - move to next batch
-
-                    elif resp.status_code in [403, 429]:
-                        # Rate limited
-                        if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
-                            logger.warning(f"🔄 Bulk audio features rate limited (403/429), waiting {delay}s before retry {attempt + 2}/{max_retries}...")
-                            print(f"[DEBUG SPOTIFY] Rate limited, retrying in {delay}s...", flush=True)
-                            await asyncio.sleep(delay)
-                            continue
-                        else:
-                            logger.error(f"❌ Bulk audio features still rate limited after {max_retries} retries - this batch failed")
-                            print(f"[DEBUG SPOTIFY] Max retries reached, batch failed", flush=True)
-                            break
-                    else:
-                        print(f"[DEBUG SPOTIFY] Non-200 response: {resp.text[:200]}", flush=True)
-                        break  # Other error - don't retry
-
-        except httpx.HTTPError as exc:
-            logger.warning("Batch features fetch failed (%s), falling back to individual fetches", exc)
-            # Fallback to individual fetches for remaining uncached
-            for track_id in uncached_ids:
-                if track_id not in features_dict:
-                    features = await self.get_track_features(track_id)
-                    if features:
-                        features_dict[track_id] = features
-
-        return features_dict
-
-    async def get_artists(self, artist_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
-        """Fetch artist metadata (genres, etc.) with caching."""
-        if self.demo_mode or not artist_ids:
-            return {}
-
-        results: Dict[str, Dict[str, Any]] = {}
-        unique: List[str] = []
-
-        for artist_id in artist_ids:
-            if not artist_id:
-                continue
-            cached = await self._cache_get(self._artist_cache, artist_id)
-            if cached is not None:
-                results[artist_id] = cached
-            elif artist_id not in unique:
-                unique.append(artist_id)
-
-        if not unique:
-            return results
-
-        for idx in range(0, len(unique), 50):
-            batch = unique[idx : idx + 50]
-            params = {"ids": ",".join(batch)}
-
-            try:
-                resp = await self._request("GET", "https://api.spotify.com/v1/artists", params=params)
-                resp.raise_for_status()
-            except httpx.HTTPError as exc:
-                logger.warning("Spotify artists lookup failed for batch starting %s (%s)", batch[0], exc)
-                continue
-
-            payload = resp.json()
-            for item in payload.get("artists", []) or []:
-                artist_id = item.get("id")
-                if not artist_id:
-                    continue
-                results[artist_id] = item
-                await self._cache_set(self._artist_cache, artist_id, item)
-
-        return results
-
-    async def get_playlist_tracks(
-        self,
-        playlist_id: str,
-        *,
-        limit: int = 100,
-        max_tracks: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Return parsed track entries from a Spotify playlist."""
-        if self.demo_mode:
-            raise RuntimeError("SpotifyClient is in demo mode; playlist tracks unavailable.")
-
-        assert self._client, "Call start() before using the client"
-
-        collected: List[Dict[str, Any]] = []
-        page_size = max(1, min(limit, 100))
-        offset = 0
-
-        while True:
-            params = {
-                "limit": page_size,
-                "offset": offset,
-                "market": "US",
-            }
-
-            resp = await self._request(
-                "GET",
-                f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks",
-                params=params,
-            )
-
-            if resp.status_code == 404:
-                logger.warning("Playlist %s not found or inaccessible", playlist_id)
-                break
-
-            resp.raise_for_status()
-            payload = resp.json()
-
-            for item in payload.get("items", []) or []:
-                track = item.get("track")
-                if not track or track.get("is_local"):
-                    continue
-                parsed = self._parse_spotify_track(track)
-                collected.append(parsed)
-
-                if max_tracks and len(collected) >= max_tracks:
-                    return collected[:max_tracks]
-
-            next_url = payload.get("next")
-            if not next_url:
-                break
-
-            offset += page_size
-
-        return collected
-
-    async def get_recommendations(self, seed_tracks: List[str], limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recommendations based on seed tracks."""
-        if self.demo_mode:
-            return self._fallback_recommendations(seed_tracks, limit)
-
-        try:
-            # Use first seed track for recommendations
-            seed_track = seed_tracks[0] if seed_tracks else ""
-            params = {
-                "seed_tracks": seed_track,
-                "limit": limit,
-                "market": "US"
-            }
-
-            resp = await self._request("GET", "https://api.spotify.com/v1/recommendations", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-
-            return [self._parse_spotify_track(t) for t in data.get("tracks", [])]
-
-        except httpx.HTTPError as exc:
-            logger.warning("Spotify recommendations API failed (%s), allowing Apple Music fallback", exc)
-            return []
 
     async def get_tracks_bulk(self, track_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """Fetch full track metadata for a batch of Spotify track IDs."""
@@ -542,55 +295,6 @@ class SpotifyClient:
                 "external_urls": {"spotify": f"https://open.spotify.com/track/fallback_{i}"},
                 "uri": f"spotify:track:fallback_{i}",
                 "release_date": f"{random.randint(1970, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "image_url": None,
-                "provider": "spotify-fallback",
-                "metadata": {},
-            })
-
-        return results
-
-    def _fallback_audio_features(self) -> Dict[str, Any]:
-        """Generate fallback audio features."""
-        return {
-            "acousticness": random.uniform(0.0, 1.0),
-            "danceability": random.uniform(0.0, 1.0),
-            "energy": random.uniform(0.0, 1.0),
-            "instrumentalness": random.uniform(0.0, 1.0),
-            "liveness": random.uniform(0.0, 1.0),
-            "loudness": random.uniform(-60.0, 0.0),
-            "speechiness": random.uniform(0.0, 1.0),
-            "tempo": random.uniform(60.0, 200.0),
-            "valence": random.uniform(0.0, 1.0),
-            "key": random.randint(0, 11),
-            "mode": random.randint(0, 1),
-            "time_signature": random.choice([3, 4, 5])
-        }
-
-    def _fallback_recommendations(self, seed_tracks: List[str], limit: int) -> List[Dict[str, Any]]:
-        """Generate fallback recommendations."""
-        recommendations = [
-            {"name": "Levitating", "artist": "Dua Lipa", "album": "Future Nostalgia", "popularity": 94},
-            {"name": "Bad Habits", "artist": "Ed Sheeran", "album": "=", "popularity": 92},
-            {"name": "Stay", "artist": "The Kid LAROI, Justin Bieber", "album": "F*CK LOVE 3: OVER YOU", "popularity": 96},
-            {"name": "Good 4 U", "artist": "Olivia Rodrigo", "album": "SOUR", "popularity": 89},
-            {"name": "Watermelon Sugar", "artist": "Harry Styles", "album": "Fine Line", "popularity": 88},
-        ]
-
-        selected = random.sample(recommendations, min(len(recommendations), limit))
-
-        results = []
-        for i, track in enumerate(selected):
-            results.append({
-                "id": f"rec_{i}_{hash(track['name']) % 10000}",
-                "name": track["name"],
-                "artist": track["artist"],
-                "album": track["album"],
-                "duration_ms": random.randint(180000, 300000),
-                "popularity": track["popularity"],
-                "preview_url": None,
-                "external_urls": {"spotify": f"https://open.spotify.com/track/rec_{i}"},
-                "uri": f"spotify:track:rec_{i}",
-                "release_date": f"{random.randint(2020, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
                 "image_url": None,
                 "provider": "spotify-fallback",
                 "metadata": {},

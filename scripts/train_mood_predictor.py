@@ -12,14 +12,13 @@ Strategy:
 
 import json
 import logging
+import os
 import pickle
 import sys
-import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-import pandas as pd
 
 # Add parent to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -67,7 +66,7 @@ class MoodPredictor:
         self.model = MultiOutputRegressor(base_model)
         self.model.fit(X, y)
 
-        logger.info("✅ Model trained successfully!")
+        logger.info(" Model trained successfully!")
         return True
 
     def predict(self, embedding: np.ndarray) -> Dict[str, float]:
@@ -115,7 +114,7 @@ class MoodPredictor:
                 'feature_names': self.feature_names
             }, f)
 
-        logger.info(f"✅ Model saved to {path}")
+        logger.info(f" Model saved to {path}")
 
     def load(self, path: str):
         """Load model from disk."""
@@ -125,7 +124,7 @@ class MoodPredictor:
         self.model = data['model']
         self.feature_names = data['feature_names']
 
-        logger.info(f"✅ Model loaded from {path}")
+        logger.info(f" Model loaded from {path}")
 
 
 def load_mood_seeds(seed_file: str) -> List[Dict]:
@@ -195,8 +194,6 @@ def propagate_moods_via_similarity(
                 continue
 
             # Weighted propagation: closer neighbors get features more similar to seed
-            weight = similarity  # Could use similarity^2 for stronger decay
-
             propagated_features = [
                 seed_audio['valence'],  # Keep seed features (could blend if multiple seeds affect same track)
                 seed_audio['energy'],
@@ -252,10 +249,10 @@ def main():
         logger.error("No training data generated! Seeds may not be in item2vec.")
         return
 
-    logger.info(f"\nTraining dataset:")
+    logger.info("\nTraining dataset:")
     logger.info(f"  Samples: {len(X_train)}")
     logger.info(f"  Embedding dim: {X_train.shape[1]}")
-    logger.info(f"  Features: valence, energy, acousticness, danceability")
+    logger.info("  Features: valence, energy, acousticness, danceability")
 
     # Train model
     logger.info("\n" + "="*80)
