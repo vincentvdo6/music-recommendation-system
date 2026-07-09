@@ -31,6 +31,7 @@ nul
 # Model weights and derived data (fetched via scripts/download_models.py)
 models/
 evaluation/
+!evaluation/calibration.json
 data/smpd/
 
 # Large binary formats — never commit
