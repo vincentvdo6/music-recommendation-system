@@ -183,6 +183,29 @@ def mood_predictor(tmp_path):
 
 
 @pytest.fixture
+def audio_store(vocab, tmp_path):
+    """Audio embeddings that mirror the vocab clusters: t-tracks near audio
+    axis 0, u-tracks near audio axis 1 — but only for even-numbered tracks,
+    so has_audio has both values."""
+    from services.recommendation.audio_store import AudioStore
+
+    rng = np.random.default_rng(11)
+    rows = []
+    for tid in sorted(vocab):
+        if int(tid[1:]) % 2:
+            continue  # odd tracks have no audio
+        base = np.zeros(16, dtype=np.float32)
+        base[0 if tid.startswith("t") else 1] = 1.0
+        vec = (base + rng.normal(0, 0.1, 16)).astype(np.float16)
+        rows.append({"track_id": tid, "embedding": vec.tobytes()})
+    path = tmp_path / "audio_emb.parquet"
+    pd.DataFrame(rows).to_parquet(path)
+    store = AudioStore(str(path))
+    assert store.available
+    return store
+
+
+@pytest.fixture
 def engine(embeddings, track_meta, mood_predictor):
     from services.recommendation.engine import RecommendationEngine
     from services.recommendation.ranker import LinearFallbackRanker

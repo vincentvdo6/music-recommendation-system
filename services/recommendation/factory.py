@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from services.recommendation.audio_store import AudioStore
 from services.recommendation.embeddings import EmbeddingService
 from services.recommendation.engine import DEFAULT_DISCOVERY, DEFAULT_SEED_AFFINITY, RecommendationEngine
 from services.recommendation.mood import MoodPredictor
@@ -33,6 +34,7 @@ RANKER_PATH = "models/ranker/lightgbm_ranker_v2.txt"
 NCF_PATH = "models/ncf/ncf_item_v2.pt"
 TRACK_META_PATH = "models/meta/track_meta.parquet"
 MOOD_PATH = "models/mood_predictor/mood_predictor.pkl"
+AUDIO_EMB_PATH = "models/audio/audio_emb.parquet"
 
 
 def create_engine(
@@ -42,6 +44,7 @@ def create_engine(
     ncf_path: str = NCF_PATH,
     track_meta_path: str = TRACK_META_PATH,
     mood_path: str = MOOD_PATH,
+    audio_path: str = AUDIO_EMB_PATH,
 ) -> Optional[RecommendationEngine]:
     """Build the engine from whatever artifacts exist on disk."""
     if not Path(item2vec_path).exists():
@@ -78,6 +81,13 @@ def create_engine(
         except Exception as exc:
             logger.warning("Failed to load mood predictor: %s", exc)
 
+    audio = AudioStore()
+    if Path(audio_path).exists():
+        try:
+            audio.load(audio_path)
+        except Exception as exc:
+            logger.warning("Failed to load audio embeddings: %s", exc)
+
     def env_float(name: str, default: float) -> float:
         try:
             return float(os.getenv(name, default))
@@ -94,18 +104,20 @@ def create_engine(
         mood=mood,
         ncf=ncf,
         track_meta=track_meta,
+        audio=audio,
         seed_affinity=seed_affinity,
         discovery=discovery,
     )
 
     logger.info(
-        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | seed_affinity: %.1f | discovery: %.1f",
+        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | audio: %s | seed_affinity: %.1f | discovery: %.1f",
         len(embeddings.item2vec.wv),
         "yes" if embeddings.ann_index else "no (gensim fallback)",
         ranker.name,
         f"{ncf.vocab_size} tracks" if ncf else "no",
         "yes" if track_meta.available else "no",
         "yes" if mood.available else "no",
+        f"{len(audio._row_of)} tracks" if audio.available else "no",
         seed_affinity,
         discovery,
     )

@@ -67,18 +67,20 @@ class LinearFallbackRanker:
 
     name = "linear-fallback"
 
-    # Seed-first philosophy: the searched song dominates, playlist context
-    # and mood coherence follow, popularity is a mild prior.
+    # Seed-first philosophy: the searched song dominates (by co-occurrence AND
+    # by sound), playlist context and mood coherence follow, popularity is a
+    # mild prior.
     DEFAULT_WEIGHTS: Dict[str, float] = {
-        "seed_i2v_cos": 0.40,
-        "playlist_i2v_cos": 0.15,
-        "playlist_i2v_max": 0.08,
+        "seed_i2v_cos": 0.35,
+        "playlist_i2v_cos": 0.12,
+        "playlist_i2v_max": 0.07,
         "i2v_seed_rr": 0.05,
         "i2v_playlist_rr": 0.02,
-        "ncf_score": 0.10,
-        "log_pop": 0.05,
+        "ncf_score": 0.08,
+        "log_pop": 0.04,
         "artist_in_playlist": 0.02,
-        "mood_sim": 0.13,
+        "mood_sim": 0.10,
+        "audio_cos_seed": 0.15,
     }
 
     def __init__(self, weights: Dict[str, float] | None = None):

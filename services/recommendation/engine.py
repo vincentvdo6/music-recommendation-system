@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from services.recommendation import features as F
+from services.recommendation.audio_store import AudioStore
 from services.recommendation.embeddings import EmbeddingService
 from services.recommendation.mood import MoodPredictor
 from services.recommendation.ncf import ItemNCFScorer
@@ -66,6 +67,9 @@ FEATURE_LABELS = {
     "danceability_diff": "similar danceability",
     "mood_sim": "matches the mood",
     "duration_diff": "similar length",
+    "audio_cos_seed": "sounds like the seed track",
+    "audio_cos_playlist": "sounds like your playlist",
+    "has_audio": "audio analyzed",
 }
 
 
@@ -79,6 +83,7 @@ class RecommendationEngine:
         mood: Optional[MoodPredictor] = None,
         ncf: Optional[ItemNCFScorer] = None,
         track_meta: Optional[TrackMetaStore] = None,
+        audio: Optional[AudioStore] = None,
         seed_affinity: float = DEFAULT_SEED_AFFINITY,
         discovery: float = DEFAULT_DISCOVERY,
     ):
@@ -89,6 +94,7 @@ class RecommendationEngine:
         self.mood = mood if mood and mood.available else None
         self.ncf = ncf
         self.track_meta = track_meta if track_meta and track_meta.available else None
+        self.audio = audio if audio and audio.available else None
         self.seed_affinity = seed_affinity
         self.discovery = discovery
 
@@ -134,7 +140,14 @@ class RecommendationEngine:
         log_pop = self.track_meta.log_pop(ids) if self.track_meta else np.zeros(len(ids), dtype=np.float32)
         durations = self.track_meta.durations_ms(ids) if self.track_meta else np.zeros(len(ids), dtype=np.float32)
 
-        X = F.build_matrix(ids, vectors, artists_norm, log_pop, durations, moods, ncf_scores, ncf_mask, ctx)
+        audio_vecs = None
+        if self.audio:
+            audio_vecs, _ = self.audio.matrix_for(ids)
+            ctx.seed_audio_vec = self._seed_audio(seed_id, input_artist_name)
+            ctx.playlist_audio_mean = self.audio.mean_vector(playlist_tracks[:PLAYLIST_VEC_SAMPLE])
+
+        X = F.build_matrix(ids, vectors, artists_norm, log_pop, durations, moods, ncf_scores, ncf_mask, ctx,
+                           audio_vecs=audio_vecs)
         scores = self.ranker.predict(X)
 
         seed_cos = X["seed_i2v_cos"].to_numpy()
@@ -225,6 +238,21 @@ class RecommendationEngine:
         ]
 
     # ------------------------------------------------------------ internals
+
+    def _seed_audio(self, seed_id: Optional[str], input_artist_name: Optional[str]):
+        """Seed's preview embedding — direct, else via a same-artist track with audio."""
+        if not self.audio:
+            return None
+        if seed_id is not None:
+            vec = self.audio.vector(seed_id)
+            if vec is not None:
+                return vec
+        if input_artist_name and self.track_meta:
+            for cand in self.track_meta.tracks_by_artist(input_artist_name, limit=20):
+                vec = self.audio.vector(cand)
+                if vec is not None:
+                    return vec
+        return None
 
     def _resolve_seed(
         self, input_track_id: Optional[str], input_artist_name: Optional[str]

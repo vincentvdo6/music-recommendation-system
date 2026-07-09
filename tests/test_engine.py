@@ -128,6 +128,26 @@ def test_discovery_dampens_popularity(embeddings, track_meta, mood_predictor):
     assert mean_pop(results[25.0]) <= mean_pop(results[0.0])
 
 
+def test_audio_features_boost_sound_alike_candidates(embeddings, track_meta, mood_predictor, audio_store):
+    # Even-numbered tracks carry audio embeddings; with the audio store wired,
+    # candidates that SOUND like the seed earn extra score, so the share of
+    # audio-covered tracks in the top results must not drop.
+    def audio_share(recs):
+        return np.mean([int(r["id"][1:]) % 2 == 0 for r in recs])
+
+    kwargs = dict(embeddings=embeddings, ranker=LinearFallbackRanker(),
+                  mood=mood_predictor, track_meta=track_meta)
+    without = RecommendationEngine(**kwargs).recommend(playlist_of("t", 5), input_track_id="t10", limit=8)
+    audio_engine = RecommendationEngine(**kwargs, audio=audio_store)
+    with_audio = audio_engine.recommend(playlist_of("t", 5), input_track_id="t10", limit=8)
+    assert audio_share(with_audio) >= audio_share(without)
+
+    # Seed audio resolution: direct for covered tracks, same-artist proxy otherwise.
+    assert audio_engine._seed_audio("t10", None) is not None
+    assert audio_engine._seed_audio("t01", "Artist 0") is not None  # t01 has no audio; t00 (Artist 0) does
+    assert audio_engine._seed_audio("t01", None) is None
+
+
 def test_seed_cos_floor_filters_dissimilar_candidates(embeddings, track_meta, mood_predictor):
     # Playlist entirely in cluster t, seed in cluster u: playlist-side
     # candidates are near-orthogonal to the seed and should be floored out

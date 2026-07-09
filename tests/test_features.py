@@ -42,15 +42,41 @@ def test_training_feature_spec_is_in_sync():
 
 def test_missing_subsystems_produce_constants():
     X = _minimal_matrix()
-    # No seed, no playlist, no NCF, no meta -> zero features
+    # No seed, no playlist, no NCF, no meta, no audio -> zero features
     for col in ["seed_i2v_cos", "playlist_i2v_cos", "playlist_i2v_max", "i2v_seed_rr",
                 "i2v_playlist_rr", "ncf_score", "has_ncf", "log_pop",
-                "same_artist_as_seed", "artist_in_playlist", "artist_playlist_share"]:
+                "same_artist_as_seed", "artist_in_playlist", "artist_playlist_share",
+                "audio_cos_seed", "audio_cos_playlist", "has_audio"]:
         assert (X[col] == 0.0).all(), col
     # Missing mood -> neutral constants (must not reorder candidates)
     for col in ["valence_diff", "energy_diff", "acousticness_diff", "danceability_diff", "mood_sim"]:
         assert (X[col] == 0.5).all(), col
     assert (X["duration_diff"] == 1.0).all()
+
+
+def test_audio_cosines_and_indicator():
+    seed_audio = np.zeros(16, dtype=np.float32)
+    seed_audio[0] = 1.0
+    audio_vecs = np.zeros((3, 16), dtype=np.float32)
+    audio_vecs[0, 0] = 1.0   # identical to seed audio
+    audio_vecs[1, 1] = 1.0   # orthogonal
+    # row 2 stays zero: candidate without audio
+    ctx = F.RankingContext(seed_audio_vec=seed_audio)
+
+    X = _minimal_matrix(audio_vecs=audio_vecs, ctx=ctx)
+    assert np.isclose(X["audio_cos_seed"][0], 1.0)
+    assert np.isclose(X["audio_cos_seed"][1], 0.0)
+    assert np.isclose(X["audio_cos_seed"][2], 0.0)
+    assert X["has_audio"].tolist() == [1.0, 1.0, 0.0]
+    # No playlist audio reference -> playlist cosine collapses to 0
+    assert (X["audio_cos_playlist"] == 0.0).all()
+
+
+def test_audio_without_any_reference_is_constant():
+    audio_vecs = np.eye(3, 16, dtype=np.float32)
+    X = _minimal_matrix(audio_vecs=audio_vecs, ctx=F.RankingContext())
+    for col in ["audio_cos_seed", "audio_cos_playlist", "has_audio"]:
+        assert (X[col] == 0.0).all(), col
 
 
 def test_seed_cosine_and_rank_features():

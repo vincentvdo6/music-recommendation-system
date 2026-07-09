@@ -26,7 +26,8 @@ from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker 
 RANKER_PATH = ROOT / "models" / "ranker" / "lightgbm_ranker_v2.txt"
 
 
-def group_metrics(scores: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray, ks=(10, 50)) -> dict:
+def group_metrics(scores: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray,
+                  audio_cos: np.ndarray = None, ks=(10, 50)) -> dict:
     order = np.argsort(-scores)
     rel = labels[order]
     out = {}
@@ -37,9 +38,11 @@ def group_metrics(scores: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray, 
         ideal = np.sort(labels)[::-1][:k]
         idcg = float((ideal / np.log2(np.arange(2, len(ideal) + 2))).sum())
         out[f"ndcg@{k}"] = dcg / idcg if idcg > 0 else 0.0
-    # How sonically close the shown recommendations are to the seed track —
-    # the "vibe" metric that NDCG alone doesn't capture.
+    # How close the shown recommendations are to the seed — the "vibe" metrics
+    # that NDCG alone doesn't capture (co-listen cosine and acoustic cosine).
     out["seed_cos@10"] = float(seed_cos[order][:10].mean())
+    if audio_cos is not None:
+        out["audio_cos@10"] = float(audio_cos[order][:10].mean())
     return out
 
 
@@ -57,7 +60,7 @@ def main() -> int:
         "seed-cosine-only": lambda X: X["seed_i2v_cos"].to_numpy(),
         "retrieval-order": lambda X: -np.arange(len(X), dtype=np.float64),
     }
-    if RANKER_PATH.exists():
+    try:
         v2 = LightGBMRanker(str(RANKER_PATH))
         lam = DEFAULT_SEED_AFFINITY
         scorers = {
@@ -65,17 +68,21 @@ def main() -> int:
             f"v2+seed-blend(lam={lam:g})": lambda X: v2.predict(X) + lam * X["seed_i2v_cos"].to_numpy(),
             **scorers,
         }
-    else:
-        print(f"note: {RANKER_PATH} not present — comparing baselines only\n")
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"note: LightGBM ranker unavailable ({exc}) — comparing baselines only\n")
 
     results = {name: [] for name in scorers}
     for _, group in df.groupby("qid"):
-        X, y = group[FEATURE_NAMES], (group["label"].to_numpy() > 0).astype(float)
+        # Older eval samples may predate newly added features; absent columns
+        # zero-fill, matching the "subsystem absent" serving convention.
+        X = group.reindex(columns=FEATURE_NAMES, fill_value=0.0)
+        y = (group["label"].to_numpy() > 0).astype(float)
         if y.sum() == 0:
             continue
         seed_cos = group["seed_i2v_cos"].to_numpy()
+        audio_cos = group["audio_cos_seed"].to_numpy() if "audio_cos_seed" in group.columns else None
         for name, fn in scorers.items():
-            results[name].append(group_metrics(np.asarray(fn(X), dtype=np.float64), y, seed_cos))
+            results[name].append(group_metrics(np.asarray(fn(X), dtype=np.float64), y, seed_cos, audio_cos))
 
     n_groups = len(next(iter(results.values())))
     table = pd.DataFrame({

@@ -20,6 +20,10 @@ DESTINATIONS = {
     "eval_sample.parquet": ROOT / "evaluation",
 }
 
+OPTIONAL_DESTINATIONS = {
+    "audio_emb.parquet": ROOT / "models" / "audio",  # present from contract v3 onward
+}
+
 
 def main() -> int:
     if len(sys.argv) != 2:
@@ -53,6 +57,12 @@ def main() -> int:
             dest_dir.mkdir(parents=True, exist_ok=True)
             (dest_dir / name).write_bytes(zf.read(name))
             print(f"  {name} -> {dest_dir / name}")
+
+        for name, dest_dir in OPTIONAL_DESTINATIONS.items():
+            if name in names:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                (dest_dir / name).write_bytes(zf.read(name))
+                print(f"  {name} -> {dest_dir / name}")
 
     metrics = json.loads((ROOT / "models" / "metrics.json").read_text())
     print("\noffline metrics (test split):")

@@ -45,6 +45,9 @@ FEATURE_NAMES: List[str] = [
     "danceability_diff",
     "mood_sim",             # 1 - mean of the four mood diffs
     "duration_diff",        # |candidate - playlist mean| in minutes, capped at 5
+    "audio_cos_seed",       # acoustic cosine(candidate, seed) from preview embeddings
+    "audio_cos_playlist",   # acoustic cosine(candidate, playlist audio mean)
+    "has_audio",            # 1 if candidate has an audio embedding AND a reference exists
 ]
 
 # Canonical order of mood-predictor output dimensions.
@@ -80,6 +83,8 @@ class RankingContext:
     playlist_artist_share: Dict[str, float] = field(default_factory=dict)
     target_mood: Optional[np.ndarray] = None         # (4,) in MOOD_DIMS order
     playlist_mean_duration_ms: float = 0.0
+    seed_audio_vec: Optional[np.ndarray] = None      # (256,) preview embedding of the seed
+    playlist_audio_mean: Optional[np.ndarray] = None # (256,) mean over playlist audio vectors
 
 
 def build_matrix(
@@ -92,6 +97,7 @@ def build_matrix(
     ncf_scores: Optional[np.ndarray],
     ncf_mask: Optional[np.ndarray],
     ctx: RankingContext,
+    audio_vecs: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """
     Build the (n, len(FEATURE_NAMES)) feature matrix for one query.
@@ -106,6 +112,7 @@ def build_matrix(
         ncf_scores: (n,) item-NCF scores, or None if NCF unavailable
         ncf_mask: (n,) 1.0 where the candidate was actually scored, or None
         ctx: query-level context
+        audio_vecs: (n, 256) preview embeddings, zero rows where missing, or None
 
     Returns:
         DataFrame with columns exactly FEATURE_NAMES, in order.
@@ -172,5 +179,26 @@ def build_matrix(
         out["duration_diff"] = np.where(durations > 0, np.minimum(diff_min, 5.0), 1.0).astype(np.float32)
     else:
         out["duration_diff"] = np.full(n, 1.0, dtype=np.float32)
+
+    # Acoustic features from preview embeddings. Candidates or references
+    # without audio collapse to 0 (has_audio lets the model discount them);
+    # a fully absent subsystem is constant 0 and cannot reorder candidates.
+    seed_audio = _unit(ctx.seed_audio_vec)
+    playlist_audio = _unit(ctx.playlist_audio_mean)
+    if audio_vecs is not None and (seed_audio is not None or playlist_audio is not None):
+        av = np.asarray(audio_vecs, dtype=np.float32)
+        cand_has = np.abs(av).sum(axis=1) > 0
+        unit_av = _unit_rows(av)
+        out["audio_cos_seed"] = (
+            (unit_av @ seed_audio) * cand_has if seed_audio is not None else np.zeros(n, dtype=np.float32)
+        )
+        out["audio_cos_playlist"] = (
+            (unit_av @ playlist_audio) * cand_has if playlist_audio is not None else np.zeros(n, dtype=np.float32)
+        )
+        out["has_audio"] = cand_has.astype(np.float32)
+    else:
+        out["audio_cos_seed"] = np.zeros(n, dtype=np.float32)
+        out["audio_cos_playlist"] = np.zeros(n, dtype=np.float32)
+        out["has_audio"] = np.zeros(n, dtype=np.float32)
 
     return pd.DataFrame(out, columns=FEATURE_NAMES)
