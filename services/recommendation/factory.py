@@ -14,11 +14,12 @@ as unavailable). Every other artifact degrades independently:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
 from services.recommendation.embeddings import EmbeddingService
-from services.recommendation.engine import RecommendationEngine
+from services.recommendation.engine import DEFAULT_SEED_AFFINITY, RecommendationEngine
 from services.recommendation.mood import MoodPredictor
 from services.recommendation.ncf import load_item_ncf
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker
@@ -77,22 +78,30 @@ def create_engine(
         except Exception as exc:
             logger.warning("Failed to load mood predictor: %s", exc)
 
+    try:
+        seed_affinity = float(os.getenv("SEED_AFFINITY", DEFAULT_SEED_AFFINITY))
+    except ValueError:
+        logger.warning("Invalid SEED_AFFINITY env value — using default %.1f", DEFAULT_SEED_AFFINITY)
+        seed_affinity = DEFAULT_SEED_AFFINITY
+
     engine = RecommendationEngine(
         embeddings=embeddings,
         ranker=ranker,
         mood=mood,
         ncf=ncf,
         track_meta=track_meta,
+        seed_affinity=seed_affinity,
     )
 
     logger.info(
-        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s",
+        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | seed_affinity: %.1f",
         len(embeddings.item2vec.wv),
         "yes" if embeddings.ann_index else "no (gensim fallback)",
         ranker.name,
         f"{ncf.vocab_size} tracks" if ncf else "no",
         "yes" if track_meta.available else "no",
         "yes" if mood.available else "no",
+        seed_affinity,
     )
     return engine
 

@@ -19,13 +19,14 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from services.recommendation.engine import DEFAULT_SEED_AFFINITY  # noqa: E402
 from services.recommendation.features import FEATURE_NAMES  # noqa: E402
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker  # noqa: E402
 
 RANKER_PATH = ROOT / "models" / "ranker" / "lightgbm_ranker_v2.txt"
 
 
-def group_metrics(scores: np.ndarray, labels: np.ndarray, ks=(10, 50)) -> dict:
+def group_metrics(scores: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray, ks=(10, 50)) -> dict:
     order = np.argsort(-scores)
     rel = labels[order]
     out = {}
@@ -36,6 +37,9 @@ def group_metrics(scores: np.ndarray, labels: np.ndarray, ks=(10, 50)) -> dict:
         ideal = np.sort(labels)[::-1][:k]
         idcg = float((ideal / np.log2(np.arange(2, len(ideal) + 2))).sum())
         out[f"ndcg@{k}"] = dcg / idcg if idcg > 0 else 0.0
+    # How sonically close the shown recommendations are to the seed track —
+    # the "vibe" metric that NDCG alone doesn't capture.
+    out["seed_cos@10"] = float(seed_cos[order][:10].mean())
     return out
 
 
@@ -55,17 +59,23 @@ def main() -> int:
     }
     if RANKER_PATH.exists():
         v2 = LightGBMRanker(str(RANKER_PATH))
-        scorers = {"lightgbm-v2": lambda X: v2.predict(X), **scorers}
+        lam = DEFAULT_SEED_AFFINITY
+        scorers = {
+            "lightgbm-v2": lambda X: v2.predict(X),
+            f"v2+seed-blend(lam={lam:g})": lambda X: v2.predict(X) + lam * X["seed_i2v_cos"].to_numpy(),
+            **scorers,
+        }
     else:
         print(f"note: {RANKER_PATH} not present — comparing baselines only\n")
 
     results = {name: [] for name in scorers}
     for _, group in df.groupby("qid"):
-        X, y = group[FEATURE_NAMES], group["label"].to_numpy()
+        X, y = group[FEATURE_NAMES], (group["label"].to_numpy() > 0).astype(float)
         if y.sum() == 0:
             continue
+        seed_cos = group["seed_i2v_cos"].to_numpy()
         for name, fn in scorers.items():
-            results[name].append(group_metrics(np.asarray(fn(X), dtype=np.float64), y))
+            results[name].append(group_metrics(np.asarray(fn(X), dtype=np.float64), y, seed_cos))
 
     n_groups = len(next(iter(results.values())))
     table = pd.DataFrame({
@@ -76,8 +86,11 @@ def main() -> int:
     print(table.to_string())
 
     if "lightgbm-v2" in table.index:
-        beats = (table.loc["lightgbm-v2"] >= table.loc["seed-cosine-only"]).all()
-        print("\ngate:", "PASS — v2 >= seed-cosine baseline on all metrics"
+        # Gate on ranking quality only; seed_cos@10 is a trade-off dial, not a
+        # quality bar (the seed-cosine baseline maximizes it by definition).
+        quality_cols = [c for c in table.columns if c != "seed_cos@10"]
+        beats = (table.loc["lightgbm-v2", quality_cols] >= table.loc["seed-cosine-only", quality_cols]).all()
+        print("\ngate:", "PASS — v2 >= seed-cosine baseline on all ranking metrics"
               if beats else "FAIL — keep the linear fallback and iterate on the notebook")
         return 0 if beats else 2
     return 0

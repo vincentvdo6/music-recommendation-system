@@ -34,9 +34,16 @@ logger = logging.getLogger(__name__)
 RETRIEVAL_POOL = 1000
 SEED_SHARE = 0.7          # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
-MOOD_KEEP_PCT = 0.7       # candidates surviving the mood filter
+MOOD_KEEP_PCT = 0.55      # candidates surviving the mood filter (mirrored in the notebook)
 PLAYLIST_VEC_SAMPLE = 100
 PLAYLIST_MOOD_SAMPLE = 50
+
+# Seed-affinity blend: final = rank_score + λ · seed_i2v_cos. The ranker is
+# trained on playlist continuation, which under-weights the seed (~3.5% of
+# gain); the blend pulls results back toward the searched song's sound.
+# λ=2.0 measured as cost-free on NDCG@10 while lifting top-10 seed cosine.
+DEFAULT_SEED_AFFINITY = 2.0
+SEED_COS_FLOOR = 0.25     # prefer candidates at least this similar to the seed
 
 FEATURE_LABELS = {
     "seed_i2v_cos": "often played alongside the seed track",
@@ -69,6 +76,7 @@ class RecommendationEngine:
         mood: Optional[MoodPredictor] = None,
         ncf: Optional[ItemNCFScorer] = None,
         track_meta: Optional[TrackMetaStore] = None,
+        seed_affinity: float = DEFAULT_SEED_AFFINITY,
     ):
         if embeddings is None or embeddings.item2vec.wv is None:
             raise ValueError("RecommendationEngine requires a loaded EmbeddingService")
@@ -77,6 +85,7 @@ class RecommendationEngine:
         self.mood = mood if mood and mood.available else None
         self.ncf = ncf
         self.track_meta = track_meta if track_meta and track_meta.available else None
+        self.seed_affinity = seed_affinity
 
     # ------------------------------------------------------------------ API
 
@@ -123,7 +132,20 @@ class RecommendationEngine:
 
         X = F.build_matrix(ids, vectors, artists_norm, log_pop, durations, moods, ncf_scores, ncf_mask, ctx)
         scores = self.ranker.predict(X)
-        order = np.argsort(-scores)[:limit]
+
+        seed_cos = X["seed_i2v_cos"].to_numpy()
+        has_seed = ctx.seed_vec is not None
+        if has_seed and self.seed_affinity:
+            scores = scores + self.seed_affinity * seed_cos
+
+        order = np.argsort(-scores)
+        if has_seed:
+            # Prefer candidates with a minimum sonic kinship to the seed; fall
+            # back to the unfiltered ranking when the floor is too strict.
+            eligible = order[seed_cos[order] >= SEED_COS_FLOOR]
+            if len(eligible) >= limit:
+                order = eligible
+        order = order[:limit]
         explanations = self.ranker.explain(X.iloc[order])
 
         meta = self.track_meta.lookup([ids[i] for i in order]) if self.track_meta else None

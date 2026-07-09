@@ -84,3 +84,35 @@ def test_similarity_score_is_seed_cosine(engine, vocab):
         vec = vocab[rec["id"]]
         expected = float(vec / np.linalg.norm(vec) @ seed_unit)
         assert abs(rec["similarity_score"] - expected) < 1e-5
+
+
+def _mean_seed_cos(recs):
+    return np.mean([r["similarity_score"] for r in recs])
+
+
+def test_seed_affinity_pulls_results_toward_seed(embeddings, track_meta, mood_predictor):
+    # Mixed playlist, seed from cluster u: a stronger blend must not lower the
+    # average seed cosine of what gets recommended.
+    playlist = playlist_of("t", 8) + playlist_of("u", 2)
+    results = {}
+    for affinity in (0.0, 25.0):
+        engine = RecommendationEngine(
+            embeddings=embeddings, ranker=LinearFallbackRanker(),
+            mood=mood_predictor, track_meta=track_meta, seed_affinity=affinity,
+        )
+        results[affinity] = engine.recommend(playlist, input_track_id="u20", limit=8)
+    assert _mean_seed_cos(results[25.0]) >= _mean_seed_cos(results[0.0])
+
+
+def test_seed_cos_floor_filters_dissimilar_candidates(embeddings, track_meta, mood_predictor):
+    # Playlist entirely in cluster t, seed in cluster u: playlist-side
+    # candidates are near-orthogonal to the seed and should be floored out
+    # as long as enough seed-side candidates remain.
+    engine = RecommendationEngine(
+        embeddings=embeddings, ranker=LinearFallbackRanker(),
+        mood=mood_predictor, track_meta=track_meta,
+    )
+    recs = engine.recommend(playlist_of("t", 5), input_track_id="u00", limit=6)
+    assert recs
+    from services.recommendation.engine import SEED_COS_FLOOR
+    assert all(r["similarity_score"] >= SEED_COS_FLOOR for r in recs)
