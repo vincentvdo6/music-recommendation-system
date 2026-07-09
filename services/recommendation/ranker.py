@@ -22,6 +22,17 @@ from services.recommendation.features import FEATURE_NAMES
 logger = logging.getLogger(__name__)
 
 
+def _top_positive(contribs: np.ndarray, top_k: int) -> List[Tuple[str, float]]:
+    """Top features arguing FOR the track — negative contributions would read
+    as reasons in the UI ("fits the playlist") even when the signal is absent."""
+    order = np.argsort(-contribs)[:top_k]
+    out = [(FEATURE_NAMES[i], float(contribs[i])) for i in order if contribs[i] > 0.0]
+    if not out:  # degenerate all-zero row: fall back to the least-negative feature
+        i = int(np.argmax(contribs))
+        out = [(FEATURE_NAMES[i], float(contribs[i]))]
+    return out
+
+
 class LightGBMRanker:
     """LambdaRank model trained by training/kaggle_train_ranker.ipynb."""
 
@@ -46,13 +57,9 @@ class LightGBMRanker:
         return self.model.predict(features[FEATURE_NAMES])
 
     def explain(self, features: pd.DataFrame, top_k: int = 3) -> List[List[Tuple[str, float]]]:
-        """Per-row top contributing features via SHAP-style pred_contrib."""
+        """Per-row top supporting features via SHAP-style pred_contrib."""
         contribs = self.model.predict(features[FEATURE_NAMES], pred_contrib=True)[:, :-1]  # drop bias column
-        results = []
-        for row in contribs:
-            order = np.argsort(-np.abs(row))[:top_k]
-            results.append([(FEATURE_NAMES[i], float(row[i])) for i in order if row[i] != 0.0])
-        return results
+        return [_top_positive(row, top_k) for row in contribs]
 
 
 class LinearFallbackRanker:
@@ -86,8 +93,4 @@ class LinearFallbackRanker:
 
     def explain(self, features: pd.DataFrame, top_k: int = 3) -> List[List[Tuple[str, float]]]:
         contribs = features[FEATURE_NAMES].to_numpy(dtype=np.float64) * self._weight_vec
-        results = []
-        for row in contribs:
-            order = np.argsort(-np.abs(row))[:top_k]
-            results.append([(FEATURE_NAMES[i], float(row[i])) for i in order if row[i] != 0.0])
-        return results
+        return [_top_positive(row, top_k) for row in contribs]
