@@ -70,20 +70,22 @@ match — training/serving drift fails loudly, at startup.
 
 ## Offline evaluation
 
-Metrics on 3,323 held-out playlists (leave-N-out, candidates from the serving
-retrieval path) — from `models/metrics.json`, reproduced locally by
+Metrics on held-out playlists (leave-N-out, candidates from the serving
+retrieval path, **seed-graded relevance**: continuations closer to the seed's
+sound are worth more) — from `models/metrics.json`, reproduced locally by
 [`scripts/evaluate.py`](scripts/evaluate.py):
 
-| Ranker | NDCG@10 | Recall@10 | Recall@50 |
-|---|---|---|---|
-| **LightGBM LambdaRank (v2)** | **0.370** | **0.494** | **0.838** |
-| seed-cosine only (previous system) | 0.152 | 0.199 | 0.427 |
-| popularity only | 0.151 | 0.239 | 0.633 |
-| raw retrieval order | 0.151 | 0.198 | 0.422 |
+| Ranker | NDCG@10 | Recall@10 | Recall@50 | seed-cos@10 |
+|---|---|---|---|---|
+| **LightGBM LambdaRank (seed-graded)** | **0.397** | **0.538** | **0.879** | 0.671 |
+| seed-cosine only (previous system) | 0.170 | 0.227 | 0.481 | 0.793 |
+| popularity only | 0.173 | 0.278 | 0.700 | 0.651 |
+| raw retrieval order | 0.169 | 0.227 | 0.474 | 0.793 |
 
-2.4× the NDCG@10 of the single-signal system it replaced, with Recall@50
-nearly doubled. Top features by gain: playlist ANN reciprocal rank, artist
-playlist share, max playlist cosine, MPD popularity prior.
+2.3× the NDCG@10 of the single-signal system it replaced, with Recall@50
+nearly doubled. Serving adds tunable dials on top: `SEED_AFFINITY` (pull
+results toward the seed's sound) and `DISCOVERY` (dampen the popularity prior
+for surprising-but-fitting deep cuts).
 
 ## Running it
 
