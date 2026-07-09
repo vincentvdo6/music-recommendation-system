@@ -30,7 +30,7 @@ nul
 
 # Model weights and derived data (fetched via scripts/download_models.py)
 models/
-evaluation/
+evaluation/*
 !evaluation/calibration.json
 data/smpd/
 

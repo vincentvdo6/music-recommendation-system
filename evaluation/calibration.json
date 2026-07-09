@@ -1,0 +1,14 @@
+{
+  "description": "Ground-truth vibe sets. Criterion: scene-swappability — could the target replace the seed in the scene/moment the seed evokes? Any target should also work as a seed producing the others. Tracked by scripts/vibe_check.py --calibration across every model and catalog change.",
+  "sets": [
+    {
+      "seed": "Rewind - Goldspot",
+      "note": "The How I Met Your Mother song. Thread: wistful emotional register + warm jangly sonic texture, age-blind (targets span 1972-2021).",
+      "targets": [
+        "When The Lights Go Out - Crybaby",
+        "fake prophet - Tai Verdes",
+        "The Ballad Of El Goodo - Big Star"
+      ]
+    }
+  ]
+}
