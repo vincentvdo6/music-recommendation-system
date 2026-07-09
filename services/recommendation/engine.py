@@ -32,17 +32,20 @@ from services.recommendation.track_meta import TrackMetaStore
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_POOL = 1000
-SEED_SHARE = 0.7          # fraction of the pool retrieved from the seed's neighbors
+SEED_SHARE = 0.85         # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
 MOOD_KEEP_PCT = 0.55      # candidates surviving the mood filter (mirrored in the notebook)
 PLAYLIST_VEC_SAMPLE = 100
 PLAYLIST_MOOD_SAMPLE = 50
 
-# Seed-affinity blend: final = rank_score + λ · seed_i2v_cos. The ranker is
-# trained on playlist continuation, which under-weights the seed (~3.5% of
-# gain); the blend pulls results back toward the searched song's sound.
-# λ=2.0 measured as cost-free on NDCG@10 while lifting top-10 seed cosine.
-DEFAULT_SEED_AFFINITY = 2.0
+# Serving-side blend: final = rank_score + λ·seed_i2v_cos − μ·log_pop.
+# The ranker optimizes playlist continuation, which under-weights the seed and
+# rewards popular picks; λ pulls results toward the searched song's sound and
+# μ trades chart hits for "surprising but fitting" deeper cuts. Defaults from
+# an eval-sample sweep: λ=3/μ=2 lifts top-10 seed cosine 0.652→0.693 and cuts
+# result popularity for under 2% NDCG@10.
+DEFAULT_SEED_AFFINITY = 3.0
+DEFAULT_DISCOVERY = 2.0
 SEED_COS_FLOOR = 0.25     # prefer candidates at least this similar to the seed
 
 FEATURE_LABELS = {
@@ -77,6 +80,7 @@ class RecommendationEngine:
         ncf: Optional[ItemNCFScorer] = None,
         track_meta: Optional[TrackMetaStore] = None,
         seed_affinity: float = DEFAULT_SEED_AFFINITY,
+        discovery: float = DEFAULT_DISCOVERY,
     ):
         if embeddings is None or embeddings.item2vec.wv is None:
             raise ValueError("RecommendationEngine requires a loaded EmbeddingService")
@@ -86,6 +90,7 @@ class RecommendationEngine:
         self.ncf = ncf
         self.track_meta = track_meta if track_meta and track_meta.available else None
         self.seed_affinity = seed_affinity
+        self.discovery = discovery
 
     # ------------------------------------------------------------------ API
 
@@ -97,16 +102,15 @@ class RecommendationEngine:
         input_track_name: Optional[str] = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Recommend tracks for a playlist, driven by the searched song."""
-        if not playlist_tracks:
-            return []
-
+        """Recommend tracks driven by the searched song; the playlist (optional) adds flavor."""
         seed_id, seed_proxied = self._resolve_seed(input_track_id, input_artist_name)
         if input_track_id and not seed_id:
             logger.info(
                 "Seed %s ('%s' by '%s') not in model and no proxy found — playlist-only retrieval",
                 input_track_id, input_track_name, input_artist_name,
             )
+        if not playlist_tracks and not seed_id:
+            return []
 
         ids, ctx = self._retrieve(playlist_tracks, seed_id, input_track_id)
         if not ids:
@@ -137,6 +141,9 @@ class RecommendationEngine:
         has_seed = ctx.seed_vec is not None
         if has_seed and self.seed_affinity:
             scores = scores + self.seed_affinity * seed_cos
+        if self.discovery:
+            # Dampen the popularity prior: surprising-but-fitting over chart hits.
+            scores = scores - self.discovery * X["log_pop"].to_numpy()
 
         order = np.argsort(-scores)
         if has_seed:
@@ -237,13 +244,17 @@ class RecommendationEngine:
     ) -> Tuple[List[str], F.RankingContext]:
         ctx = F.RankingContext()
         seed_neighbors: List[str] = []
+        playlist_neighbors: List[str] = []
         if seed_id:
-            seed_neighbors = self.embeddings.get_neighbors(track_id=seed_id, k=int(RETRIEVAL_POOL * SEED_SHARE))
-            playlist_neighbors = self.embeddings.get_playlist_neighbors(
-                playlist_tracks, k=int(RETRIEVAL_POOL * (1 - SEED_SHARE))
-            )
+            # Seed-only mode gets the entire pool from the seed's neighbors.
+            k_seed = RETRIEVAL_POOL if not playlist_tracks else int(RETRIEVAL_POOL * SEED_SHARE)
+            seed_neighbors = self.embeddings.get_neighbors(track_id=seed_id, k=k_seed)
+            if playlist_tracks:
+                playlist_neighbors = self.embeddings.get_playlist_neighbors(
+                    playlist_tracks, k=RETRIEVAL_POOL - k_seed
+                )
             ctx.seed_vec = self.embeddings.item2vec.vector(seed_id)
-        else:
+        elif playlist_tracks:
             playlist_neighbors = self.embeddings.get_playlist_neighbors(playlist_tracks, k=RETRIEVAL_POOL)
 
         ctx.seed_rank = {tid: rank for rank, tid in enumerate(seed_neighbors)}

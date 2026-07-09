@@ -92,28 +92,30 @@ class MusicService:
         limit: int = 5,
     ) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
         """
-        Generate recommendations from a user playlist, driven by the searched song.
+        Generate recommendations driven by the searched song ("seed").
 
-        The 'seed' is the INPUT TRACK — the song the user searched for. It is
-        the primary driver: the engine retrieves 70% of candidates from its
-        neighbors and weights ranking toward it.
+        The seed is the primary driver: most of the candidate pool comes from
+        its neighbors and ranking is weighted toward it. The playlist is
+        optional flavor — seed-only requests are fully supported.
         """
-        if not tracks_payload:
+        if not tracks_payload and not seed:
             return [], "playlist", {"playlist_size": 0, "resolved_tracks": 0}
 
         if not self.spotify or self.spotify.demo_mode:
-            raise RuntimeError("Spotify credentials required for playlist-based recommendations")
+            raise RuntimeError("Spotify credentials required for recommendations")
 
         if not self.engine:
             raise RuntimeError("Recommendation engine unavailable — model artifacts are missing")
 
         normalised_inputs = self._normalise_playlist_inputs(tracks_payload)
-        tracks_map = await self._resolve_playlist_tracks(normalised_inputs)
-        if not tracks_map:
+        tracks_map = await self._resolve_playlist_tracks(normalised_inputs) if normalised_inputs else {}
+        if tracks_payload and not tracks_map:
             raise RuntimeError("Could not resolve any tracks from supplied playlist data")
 
         playlist_track_ids = list(tracks_map.keys())
         input_track_id = self._resolve_input_track_id(seed, normalised_inputs, tracks_map)
+        if not input_track_id:
+            raise RuntimeError("Provide a seed track or a playlist with resolvable tracks")
 
         # The engine needs the seed's artist name for proxy lookup when the
         # track itself isn't in the model vocabulary.
@@ -129,7 +131,7 @@ class MusicService:
             input_track_name=(input_metadata or {}).get("name"),
             limit=limit * 3,  # headroom for enrichment losses + artist dedup
         )
-        source = "ml-playlist"
+        source = "ml-playlist" if playlist_track_ids else "ml-seed"
 
         if not recommendations:
             logger.warning("Engine returned no recommendations — using popularity fallback")

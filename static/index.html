@@ -21,14 +21,14 @@
     <section class="step" id="importStep">
       <div class="step-head">
         <span class="step-no">01</span>
-        <h2 class="step-title">Your library</h2>
+        <h2 class="step-title">Your library — optional</h2>
       </div>
       <div class="field-row">
         <input id="playlistUrlInput" class="field" type="url" autocomplete="off" spellcheck="false"
-          placeholder="Paste a public Spotify playlist link">
+          placeholder="Paste a public Spotify playlist link to flavor results with your taste">
         <button id="playlistImportBtn" class="btn" type="button">Import</button>
       </div>
-      <p id="playlistStatus" class="status-line">No playlist loaded yet.</p>
+      <p id="playlistStatus" class="status-line">No playlist — searches run in pure seed mode.</p>
     </section>
 
     <section class="step" id="seedStep">
@@ -39,10 +39,10 @@
       <form id="searchForm" class="field-row">
         <div class="search-wrap">
           <input id="songInput" class="field" type="text" autocomplete="off" spellcheck="false"
-            placeholder="Search the song you can't stop playing" disabled>
+            placeholder="Search the song you can't stop playing">
           <div id="suggestions" class="suggestions hidden" role="listbox"></div>
         </div>
-        <button id="searchBtn" class="btn" type="submit" disabled>Recommend</button>
+        <button id="searchBtn" class="btn" type="submit">Recommend</button>
       </form>
       <div id="errorBanner" class="error-banner hidden" role="alert"></div>
     </section>

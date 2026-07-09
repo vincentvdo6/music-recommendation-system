@@ -104,6 +104,30 @@ def test_seed_affinity_pulls_results_toward_seed(embeddings, track_meta, mood_pr
     assert _mean_seed_cos(results[25.0]) >= _mean_seed_cos(results[0.0])
 
 
+def test_seed_only_mode_works_without_playlist(engine):
+    recs = engine.recommend([], input_track_id="t10", limit=5)
+    assert recs
+    assert all(r["id"] != "t10" for r in recs)
+    assert all(r["id"].startswith("t") for r in recs)  # pool is 100% seed neighbors
+
+
+def test_discovery_dampens_popularity(embeddings, track_meta, mood_predictor):
+    # track_meta assigns playlist_count = 1..N over sorted ids, so u-cluster
+    # tracks are the "popular" ones. A strong discovery weight must not raise
+    # the average popularity of what gets recommended.
+    def mean_pop(recs):
+        return np.mean([track_meta.lookup([r["id"]])["playlist_count"].iloc[0] for r in recs])
+
+    results = {}
+    for discovery in (0.0, 25.0):
+        engine = RecommendationEngine(
+            embeddings=embeddings, ranker=LinearFallbackRanker(),
+            mood=mood_predictor, track_meta=track_meta, discovery=discovery,
+        )
+        results[discovery] = engine.recommend(playlist_of("t", 5), input_track_id="t10", limit=8)
+    assert mean_pop(results[25.0]) <= mean_pop(results[0.0])
+
+
 def test_seed_cos_floor_filters_dissimilar_candidates(embeddings, track_meta, mood_predictor):
     # Playlist entirely in cluster t, seed in cluster u: playlist-side
     # candidates are near-orthogonal to the seed and should be floored out

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from services.recommendation.embeddings import EmbeddingService
-from services.recommendation.engine import DEFAULT_SEED_AFFINITY, RecommendationEngine
+from services.recommendation.engine import DEFAULT_DISCOVERY, DEFAULT_SEED_AFFINITY, RecommendationEngine
 from services.recommendation.mood import MoodPredictor
 from services.recommendation.ncf import load_item_ncf
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker
@@ -78,11 +78,15 @@ def create_engine(
         except Exception as exc:
             logger.warning("Failed to load mood predictor: %s", exc)
 
-    try:
-        seed_affinity = float(os.getenv("SEED_AFFINITY", DEFAULT_SEED_AFFINITY))
-    except ValueError:
-        logger.warning("Invalid SEED_AFFINITY env value — using default %.1f", DEFAULT_SEED_AFFINITY)
-        seed_affinity = DEFAULT_SEED_AFFINITY
+    def env_float(name: str, default: float) -> float:
+        try:
+            return float(os.getenv(name, default))
+        except ValueError:
+            logger.warning("Invalid %s env value — using default %.1f", name, default)
+            return default
+
+    seed_affinity = env_float("SEED_AFFINITY", DEFAULT_SEED_AFFINITY)
+    discovery = env_float("DISCOVERY", DEFAULT_DISCOVERY)
 
     engine = RecommendationEngine(
         embeddings=embeddings,
@@ -91,10 +95,11 @@ def create_engine(
         ncf=ncf,
         track_meta=track_meta,
         seed_affinity=seed_affinity,
+        discovery=discovery,
     )
 
     logger.info(
-        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | seed_affinity: %.1f",
+        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | seed_affinity: %.1f | discovery: %.1f",
         len(embeddings.item2vec.wv),
         "yes" if embeddings.ann_index else "no (gensim fallback)",
         ranker.name,
@@ -102,6 +107,7 @@ def create_engine(
         "yes" if track_meta.available else "no",
         "yes" if mood.available else "no",
         seed_affinity,
+        discovery,
     )
     return engine
 

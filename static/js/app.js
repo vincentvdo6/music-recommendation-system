@@ -102,14 +102,10 @@ async function handleImport() {
       `${name ? name + " — " : ""}${state.playlist.length} tracks ready. Now search a seed song.`,
       true
     );
-    els.songInput.disabled = false;
-    els.searchBtn.disabled = false;
     els.songInput.focus();
   } catch (err) {
     state.playlist = [];
-    els.songInput.disabled = true;
-    els.searchBtn.disabled = true;
-    setStatus("Import failed — make sure the playlist is public.");
+    setStatus("Import failed — make sure the playlist is public. Searches still work in seed mode.");
     showError(err.message);
   } finally {
     els.importBtn.disabled = false;
@@ -208,7 +204,7 @@ function onSearchKeydown(e) {
 async function handleSearchSubmit(e) {
   e.preventDefault();
   const query = els.songInput.value.trim();
-  if (!query || !state.playlist.length) return;
+  if (!query) return;
 
   els.searchBtn.disabled = true;
   els.searchBtn.textContent = "Finding…";
@@ -249,9 +245,14 @@ async function recommendFor(searchedTrack) {
 
 async function requestRecommendations() {
   const seedTrack = seedTrackForIndex();
-  if (!seedTrack || !state.playlist.length) return;
+  if (!seedTrack) return;
 
-  setStatus(`Ranking against ${state.playlist.length} playlist tracks…`, true);
+  setStatus(
+    state.playlist.length
+      ? `Ranking against ${state.playlist.length} playlist tracks…`
+      : "Pure seed mode — ranking by the seed's sound alone…",
+    true
+  );
   clearError();
 
   try {
@@ -264,6 +265,7 @@ async function requestRecommendations() {
 
     state.recommendations = data.recommendations;
     state.recIndex = 0;
+    els.seedCycleBtn.disabled = !state.playlist.length;
 
     const fromPlaylist = state.seedIndex >= 0 ? " (from your playlist)" : "";
     els.seedSummary.textContent =
@@ -272,9 +274,11 @@ async function requestRecommendations() {
     const inModel = data.playlist?.tracks_in_model;
     const size = data.playlist?.playlist_size ?? state.playlist.length;
     setStatus(
-      typeof inModel === "number"
-        ? `${size} tracks · ${inModel} known to the model.`
-        : `${size} tracks analysed.`,
+      size === 0
+        ? "Pure seed mode — import a playlist to flavor results with your taste."
+        : typeof inModel === "number"
+          ? `${size} tracks · ${inModel} known to the model.`
+          : `${size} tracks analysed.`,
       true
     );
 

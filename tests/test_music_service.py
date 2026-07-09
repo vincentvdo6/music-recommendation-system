@@ -112,11 +112,24 @@ async def test_unknown_tracks_dropped_by_enrichment():
     assert [r["id"] for r in recs] == ["r1"]
 
 
-async def test_empty_playlist_short_circuits():
+async def test_empty_playlist_and_no_seed_short_circuits():
     service, _, engine = make_service(["r1"], playlist_catalog())
     recs, source, info = await service.recommend_from_playlist([], seed=None, limit=5)
     assert recs == []
     assert engine.calls == []
+    assert info["playlist_size"] == 0
+
+
+async def test_seed_only_mode_without_playlist():
+    service, _, engine = make_service(["r1", "r2"], playlist_catalog())
+    recs, source, info = await service.recommend_from_playlist(
+        [], seed="spotify:track:seed1", limit=2
+    )
+    assert source == "ml-seed"
+    assert [r["id"] for r in recs] == ["r1", "r2"]
+    assert engine.calls[0]["playlist_tracks"] == []
+    assert engine.calls[0]["input_track_id"] == "seed1"
+    assert engine.calls[0]["input_artist_name"] == "Seeder"
     assert info["playlist_size"] == 0
 
 

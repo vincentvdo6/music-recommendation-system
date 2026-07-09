@@ -74,7 +74,7 @@ class PlaylistSummary(BaseModel):
 
 
 class PlaylistRecommendationsRequest(BaseModel):
-    tracks: List[PlaylistTrackInput]
+    tracks: List[PlaylistTrackInput] = Field(default_factory=list)  # optional: seed-only mode
     seed: Optional[str] = None
     limit: int = Field(5, ge=1, le=20)
 
