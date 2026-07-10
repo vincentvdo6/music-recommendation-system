@@ -11,10 +11,4 @@ services:
     volumes:
       # Mount models directory for pre-trained weights
       - ./models:/app/models:ro
-      - ./data:/app/data:ro
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3

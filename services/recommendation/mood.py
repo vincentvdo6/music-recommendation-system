@@ -3,8 +3,8 @@ Embedding-based mood predictor.
 
 Spotify deprecated its audio-features API, so mood attributes (valence,
 energy, acousticness, danceability) are predicted from item2vec embeddings
-by a model trained while the API was still available. This is the only
-"audio" signal in the system and it works entirely offline.
+by a model trained while the API was still available. Preview-derived acoustic
+embeddings are handled separately by AudioStore; both signals work offline.
 """
 
 from __future__ import annotations

@@ -6,6 +6,7 @@ from services.recommendation.audio_store import AudioStore
 
 
 def test_vectors_are_unit_normalized(audio_store):
+    assert audio_store.size == 30
     vec = audio_store.vector("t00")
     assert vec is not None
     assert np.isclose(np.linalg.norm(vec), 1.0, atol=1e-3)

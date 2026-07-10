@@ -13,18 +13,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, ORJSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
 from api.models import HealthResponse
 from api.routers import search
 from services.music.service import MusicService
 from services.spotify.client import SpotifyClient
 
+# Load .env before reading any configuration values in this module.
+load_dotenv()
+
 # Configure logging with a clean, compact format
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+API_VERSION = "0.1.0"
 
 LOG_CONFIG = {
     "version": 1,
@@ -63,21 +65,17 @@ for name, level in NOISY_LOGGERS.items():
 
 logger = logging.getLogger("music-rec")
 
-# Load environment variables
-load_dotenv()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    logger.info("Starting Music Recommendation API v0.1.0")
+    logger.info("Starting Music Recommendation API v%s", API_VERSION)
 
     # Initialize Spotify client
     spotify_client = SpotifyClient()
     music_service = MusicService(spotify=spotify_client)
     await music_service.start()
 
-    app.state.spotify = spotify_client
     app.state.music = music_service
     logger.info("Spotify demo_mode=%s", spotify_client.demo_mode)
 
@@ -89,13 +87,13 @@ async def lifespan(app: FastAPI):
         await app.state.music.close()
 
 
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
+# Use the same limiter instance that owns the route decorators.
+limiter = search.limiter
 
 app = FastAPI(
     title="Music Recommendation API",
-    description="Music recommendation system powered by Spotify Web API",
-    version="0.1.0",
+    description="Hybrid recommendation engine with Spotify and Apple metadata enrichment",
+    version=API_VERSION,
     default_response_class=ORJSONResponse,  # Faster JSON serialization
     lifespan=lifespan
 )
@@ -117,7 +115,7 @@ if ENV == "production" and not allowed_origin:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[allowed_origin] if allowed_origin else ["*"],
-    allow_credentials=True,
+    allow_credentials=bool(allowed_origin and allowed_origin != "*"),
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -177,7 +175,7 @@ app.mount("/static", CachedStatic(directory="static"), name="static")
 async def ratelimit_handler(request: Request, exc: RateLimitExceeded):
     """Handle rate limit exceeded errors."""
     response = PlainTextResponse("Rate limit exceeded. Please try again later.", status_code=429)
-    response.headers["Retry-After"] = str(exc.retry_after or 60)
+    response.headers["Retry-After"] = str(exc.limit.limit.get_expiry())
     return response
 
 # Include routers
@@ -189,7 +187,7 @@ async def health_check():
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
-        version="0.1.0",
+        version=API_VERSION,
         timestamp=time.time()
     )
 

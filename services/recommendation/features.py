@@ -1,5 +1,5 @@
 """
-Ranking feature contract (v2).
+Ranking feature contract (v3).
 
 FEATURE_NAMES is the single source of truth for the ranker feature vector.
 The Kaggle training notebook mirrors this list (training/features_spec.py);

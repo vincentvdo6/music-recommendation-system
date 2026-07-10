@@ -262,12 +262,6 @@ body {
   flex-shrink: 0;
 }
 
-.suggestion-note {
-  padding: 0.7rem 0.8rem;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
 .suggestion-title {
   font-size: 0.95rem;
   overflow: hidden;
@@ -446,6 +440,7 @@ body {
 }
 
 .match-fill {
+  display: block;
   height: 100%;
   width: 0%;
   background: var(--accent);

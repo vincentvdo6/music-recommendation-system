@@ -56,6 +56,7 @@ export class Player {
     this.embedWrap.textContent = "";
     const iframe = document.createElement("iframe");
     iframe.src = `https://open.spotify.com/embed/track/${trackId}?utm_source=generator`;
+    iframe.title = "Spotify track player";
     iframe.width = "100%";
     iframe.height = "80";
     iframe.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";

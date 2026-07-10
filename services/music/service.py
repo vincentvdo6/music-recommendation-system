@@ -120,7 +120,7 @@ class MusicService:
         # The engine needs the seed's artist name for proxy lookup when the
         # track itself isn't in the model vocabulary.
         input_metadata = tracks_map.get(input_track_id)
-        if input_track_id and not input_metadata:
+        if not input_metadata:
             fetched = await self.spotify.get_tracks_bulk([input_track_id])
             input_metadata = fetched.get(input_track_id)
 
@@ -228,7 +228,7 @@ class MusicService:
 
             track = search_cache.get(cache_key)
             if track is None and cache_key not in search_cache:
-                query = f"{name} {artist}".strip()
+                query = f"{name} {artist or ''}".strip()
                 results = await self.spotify.search_tracks(query, limit=5)
                 track = None
                 if artist:
@@ -258,12 +258,14 @@ class MusicService:
         diverse_tracks: List[Dict[str, Any]] = []
 
         for track in tracks:
-            artist_lower = track.get("artist", "Unknown").lower()
-            track_name = track.get("name", "").lower()
+            artist_lower = (track.get("artist") or "Unknown").casefold()
+            track_name = (track.get("name") or "").casefold()
 
-            if any(keyword in artist_lower for keyword in ARTIST_BLACKLIST_KEYWORDS):
-                continue
-            if any(keyword in track_name for keyword in ARTIST_BLACKLIST_KEYWORDS):
+            if any(
+                keyword in value
+                for value in (artist_lower, track_name)
+                for keyword in ARTIST_BLACKLIST_KEYWORDS
+            ):
                 continue
 
             count = artist_counts.get(artist_lower, 0)

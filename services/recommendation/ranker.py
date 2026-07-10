@@ -1,5 +1,5 @@
 """
-Ranking models over the v2 feature contract (features.FEATURE_NAMES).
+Ranking models over the current feature contract (features.FEATURE_NAMES).
 
 LightGBMRanker serves the LambdaRank model trained on Kaggle; its feature
 names are asserted against FEATURE_NAMES at load so a stale or mismatched
@@ -63,7 +63,7 @@ class LightGBMRanker:
 
 
 class LinearFallbackRanker:
-    """Hand-weighted linear scorer over the v2 features."""
+    """Hand-weighted linear scorer over the current features."""
 
     name = "linear-fallback"
 
@@ -84,7 +84,7 @@ class LinearFallbackRanker:
     }
 
     def __init__(self, weights: Dict[str, float] | None = None):
-        self.weights = weights or self.DEFAULT_WEIGHTS
+        self.weights = dict(self.DEFAULT_WEIGHTS if weights is None else weights)
         unknown = set(self.weights) - set(FEATURE_NAMES)
         if unknown:
             raise ValueError(f"Fallback weights reference unknown features: {unknown}")

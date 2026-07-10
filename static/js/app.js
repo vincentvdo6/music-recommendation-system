@@ -119,7 +119,15 @@ let debounceTimer = null;
 let searchController = null;
 let activeIndex = -1;
 
+function cancelSuggestionSearch() {
+  clearTimeout(debounceTimer);
+  debounceTimer = null;
+  searchController?.abort();
+  searchController = null;
+}
+
 function hideSuggestions() {
+  cancelSuggestionSearch();
   els.suggestions.classList.add("hidden");
   activeIndex = -1;
 }
@@ -162,20 +170,24 @@ function renderSuggestions(tracks) {
 }
 
 function onSearchInput() {
-  clearTimeout(debounceTimer);
+  cancelSuggestionSearch();
   const query = els.songInput.value.trim();
   if (query.length < 2) {
     hideSuggestions();
     return;
   }
   debounceTimer = setTimeout(async () => {
-    searchController?.abort();
-    searchController = new AbortController();
+    debounceTimer = null;
+    const controller = new AbortController();
+    searchController = controller;
     try {
-      const data = await searchTracks(query, 5, searchController.signal);
+      const data = await searchTracks(query, 5, controller.signal);
+      if (controller.signal.aborted || els.songInput.value.trim() !== query) return;
       renderSuggestions((data.results || []).map((hit) => hit.track));
     } catch (err) {
       if (err.name !== "AbortError") hideSuggestions();
+    } finally {
+      if (searchController === controller) searchController = null;
     }
   }, 150);
 }
@@ -206,6 +218,7 @@ async function handleSearchSubmit(e) {
   const query = els.songInput.value.trim();
   if (!query) return;
 
+  hideSuggestions();
   els.searchBtn.disabled = true;
   els.searchBtn.textContent = "Finding…";
   clearError();
@@ -213,7 +226,6 @@ async function handleSearchSubmit(e) {
     const data = await searchTracks(query, 1);
     const track = data.results?.[0]?.track;
     if (!track) throw new Error(`No tracks found for “${query}”`);
-    hideSuggestions();
     await recommendFor(track);
   } catch (err) {
     showError(err.message);
@@ -243,9 +255,12 @@ async function recommendFor(searchedTrack) {
   await requestRecommendations();
 }
 
+let recommendationRequestId = 0;
+
 async function requestRecommendations() {
   const seedTrack = seedTrackForIndex();
   if (!seedTrack) return;
+  const requestId = ++recommendationRequestId;
 
   setStatus(
     state.playlist.length
@@ -261,6 +276,7 @@ async function requestRecommendations() {
       seedUriOf(seedTrack),
       10
     );
+    if (requestId !== recommendationRequestId) return;
     if (!data.recommendations?.length) throw new Error("No recommendations returned");
 
     state.recommendations = data.recommendations;
@@ -286,14 +302,20 @@ async function requestRecommendations() {
     els.resultSection.classList.remove("hidden");
     els.resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
+    if (requestId !== recommendationRequestId) return;
     showError(err.message);
     setStatus("Recommendation failed — adjust the input and retry.");
   }
 }
 
+let renderTimer = null;
+
 function renderRecommendation(firstRender = false) {
   const rec = state.recommendations[state.recIndex];
   if (!rec) return;
+  clearTimeout(renderTimer);
+  renderTimer = null;
+  els.sleeve.classList.remove("swapping");
 
   const update = () => {
     els.artwork.src = rec.image_url || ART_PLACEHOLDER;
@@ -334,9 +356,10 @@ function renderRecommendation(firstRender = false) {
     return;
   }
   els.sleeve.classList.add("swapping");
-  setTimeout(() => {
+  renderTimer = setTimeout(() => {
     update();
     els.sleeve.classList.remove("swapping");
+    renderTimer = null;
   }, 200);
 }
 

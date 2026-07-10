@@ -1,8 +1,10 @@
 """Engine pipeline tests over the fake embedding/metadata/mood stack."""
 
 import numpy as np
+import pandas as pd
 
 from services.recommendation.engine import RecommendationEngine
+from services.recommendation.features import FEATURE_NAMES
 from services.recommendation.ranker import LinearFallbackRanker
 
 
@@ -20,6 +22,12 @@ def test_recommendations_have_expected_shape(engine):
         assert 0.0 <= rec["recommendation"]["components"]["mood_match"] <= 1.0
         assert rec["why"]
         assert rec["name"].startswith("Song ")
+
+
+def test_empty_fallback_weights_are_respected():
+    ranker = LinearFallbackRanker({})
+    features = pd.DataFrame(np.ones((2, len(FEATURE_NAMES))), columns=FEATURE_NAMES)
+    assert np.array_equal(ranker.predict(features), np.zeros(2))
 
 
 def test_seed_dominates_retrieval(engine):

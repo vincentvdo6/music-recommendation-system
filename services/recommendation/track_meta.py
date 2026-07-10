@@ -45,6 +45,7 @@ class TrackMetaStore:
             df = df.set_index("track_id")
         df["artist_norm"] = df["artist"].fillna("").str.lower().str.strip()
         self._df = df
+        self._artist_groups = None
         self._log_pop_denom = float(np.log1p(max(df["playlist_count"].max(), 1)))
         logger.info("Loaded track metadata for %d tracks from %s", len(df), path)
 

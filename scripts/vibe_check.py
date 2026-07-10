@@ -68,7 +68,7 @@ def analyze(engine, seed_query: str, target_queries: list) -> dict:
     neighbor_rank = {tid: i for i, tid in enumerate(engine.embeddings.get_neighbors(track_id=seed_id, k=1000))}
     seed_mood = engine.mood.predict(seed_vec.reshape(1, -1))[0] if engine.mood else None
 
-    recs = recommend(seed["id"], 20)
+    recs = recommend(seed["id"], HIT_RATE_K)
     rec_ids = [r["id"] for r in recs]
     reachable = hits = 0
 

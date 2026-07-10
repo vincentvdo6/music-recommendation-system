@@ -36,10 +36,14 @@ class FakeMusicService:
 
 @pytest.fixture
 async def client():
+    previous_music = getattr(app.state, "music", None)
     app.state.music = FakeMusicService()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        app.state.music = previous_music
 
 
 async def test_health(client):
@@ -61,6 +65,30 @@ async def test_search(client):
     data = resp.json()
     assert data["count"] == 1
     assert data["results"][0]["track"]["name"] == "Result for ivy"
+
+
+async def test_search_failure_does_not_expose_internal_error(client):
+    class FailingMusicService:
+        async def search_tracks(self, query, *, limit=10):
+            raise RuntimeError("sensitive provider detail")
+
+    app.state.music = FailingMusicService()
+    resp = await client.get("/api/v1/search", params={"q": "ivy"})
+    assert resp.status_code == 500
+    assert resp.json() == {"detail": "Search failed"}
+
+
+async def test_search_rate_limit_returns_429(client):
+    transport = ASGITransport(app=app, client=("rate-limit-test", 1234))
+    async with AsyncClient(transport=transport, base_url="http://test") as rate_client:
+        responses = [
+            await rate_client.get("/api/v1/search", params={"q": "ivy"})
+            for _ in range(31)
+        ]
+
+    assert responses[-2].status_code == 200
+    assert responses[-1].status_code == 429
+    assert responses[-1].headers["retry-after"] == "60"
 
 
 async def test_playlist_recommendations(client):

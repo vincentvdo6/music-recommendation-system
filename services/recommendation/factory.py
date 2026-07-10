@@ -5,7 +5,7 @@ item2vec embeddings are the only hard requirement — without them there is no
 retrieval and create_engine returns None (the service then reports the engine
 as unavailable). Every other artifact degrades independently:
 
-    ranker      -> LinearFallbackRanker over the same v2 features
+    ranker      -> LinearFallbackRanker over the same feature contract
     item-NCF    -> ncf_score/has_ncf features are zero
     track meta  -> artist/popularity/duration features are zero, no proxy seeds
     mood        -> mood features are neutral constants
@@ -51,17 +51,21 @@ def create_engine(
         logger.error("item2vec embeddings not found at %s — engine unavailable", item2vec_path)
         return None
 
-    embeddings = EmbeddingService(
-        item2vec_path=item2vec_path,
-        ann_index_path=ann_index_path if Path(ann_index_path).exists() else None,
-    )
+    try:
+        embeddings = EmbeddingService(
+            item2vec_path=item2vec_path,
+            ann_index_path=ann_index_path if Path(ann_index_path).exists() else None,
+        )
+    except Exception as exc:
+        logger.error("Failed to load item2vec embeddings: %s", exc)
+        return None
     if embeddings.item2vec.wv is None:
         logger.error("Failed to load item2vec embeddings — engine unavailable")
         return None
 
     try:
         ranker = LightGBMRanker(ranker_path)
-    except (FileNotFoundError, ValueError, ImportError) as exc:
+    except Exception as exc:
         logger.info("LightGBM ranker unavailable (%s) — using linear fallback", exc)
         ranker = LinearFallbackRanker()
 
@@ -117,7 +121,7 @@ def create_engine(
         f"{ncf.vocab_size} tracks" if ncf else "no",
         "yes" if track_meta.available else "no",
         "yes" if mood.available else "no",
-        f"{len(audio._row_of)} tracks" if audio.available else "no",
+        f"{audio.size} tracks" if audio.available else "no",
         seed_affinity,
         discovery,
     )

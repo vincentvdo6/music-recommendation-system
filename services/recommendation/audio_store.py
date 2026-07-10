@@ -38,6 +38,10 @@ class AudioStore:
     def dim(self) -> int:
         return self._matrix.shape[1] if self._matrix is not None else 0
 
+    @property
+    def size(self) -> int:
+        return len(self._row_of)
+
     def load(self, path: str) -> None:
         df = pd.read_parquet(path)
         if not {"track_id", "embedding"}.issubset(df.columns):

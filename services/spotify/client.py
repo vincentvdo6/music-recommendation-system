@@ -5,17 +5,12 @@ import base64
 import json
 import logging
 import os
-import random
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
 from cachetools import TTLCache
-from dotenv import load_dotenv
-
-# Ensure .env is loaded before SpotifyClient is instantiated
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +163,7 @@ class SpotifyClient:
     async def search_tracks(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search for tracks on Spotify with caching."""
         if self.demo_mode:
-            return self._fallback_search_results(query, limit)
+            return []
 
         # Create cache key
         cache_key = (query.strip().lower(), limit)
@@ -189,9 +184,10 @@ class SpotifyClient:
             await self._cache_set(self._search_cache, cache_key, tracks)
             return tracks
 
-        except httpx.HTTPError:
-            # Graceful degradation to fallback
-            return self._fallback_search_results(query, limit)
+        except httpx.HTTPError as exc:
+            # An empty result lets MusicService use its real Apple fallback.
+            logger.warning("Spotify search failed: %s", exc)
+            return []
 
     async def get_tracks_bulk(self, track_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """Fetch full track metadata for a batch of Spotify track IDs."""
@@ -199,8 +195,7 @@ class SpotifyClient:
             return {}
 
         # Preserve order but avoid duplicate network calls
-        seen: set[str] = set()
-        unique_ids = [tid for tid in track_ids if tid and not (tid in seen or seen.add(tid))]
+        unique_ids = list(dict.fromkeys(tid for tid in track_ids if tid))
         if not unique_ids:
             return {}
 
@@ -255,52 +250,6 @@ class SpotifyClient:
             "image_url": image_url,
             "metadata": {k: v for k, v in metadata.items() if v},
         }
-
-    def _fallback_search_results(self, query: str, limit: int) -> List[Dict[str, Any]]:
-        """Generate fallback search results when API is unavailable."""
-        # Popular tracks for fallback responses
-        fallback_tracks = [
-            {"name": "Blinding Lights", "artist": "The Weeknd", "album": "After Hours", "popularity": 100},
-            {"name": "Shape of You", "artist": "Ed Sheeran", "album": "÷", "popularity": 98},
-            {"name": "Someone Like You", "artist": "Adele", "album": "21", "popularity": 95},
-            {"name": "Bohemian Rhapsody", "artist": "Queen", "album": "A Night at the Opera", "popularity": 97},
-            {"name": "Hotel California", "artist": "Eagles", "album": "Hotel California", "popularity": 94},
-            {"name": "Imagine", "artist": "John Lennon", "album": "Imagine", "popularity": 93},
-            {"name": "Billie Jean", "artist": "Michael Jackson", "album": "Thriller", "popularity": 96},
-            {"name": "Stairway to Heaven", "artist": "Led Zeppelin", "album": "Led Zeppelin IV", "popularity": 95},
-            {"name": "Sweet Caroline", "artist": "Neil Diamond", "album": "Brother Love's Travelling Salvation Show", "popularity": 89},
-            {"name": "Don't Stop Believin'", "artist": "Journey", "album": "Escape", "popularity": 92}
-        ]
-
-        # Filter by query or return random selection
-        query_lower = query.lower()
-        matching_tracks = [
-            track for track in fallback_tracks
-            if query_lower in track["name"].lower() or query_lower in track["artist"].lower()
-        ]
-
-        if not matching_tracks:
-            matching_tracks = random.sample(fallback_tracks, min(len(fallback_tracks), limit))
-
-        results = []
-        for i, track in enumerate(matching_tracks[:limit]):
-            results.append({
-                "id": f"track_{i}_{hash(track['name']) % 10000}",
-                "name": track["name"],
-                "artist": track["artist"],
-                "album": track["album"],
-                "duration_ms": random.randint(180000, 300000),  # 3-5 minutes
-                "popularity": track["popularity"],
-                "preview_url": None,
-                "external_urls": {"spotify": f"https://open.spotify.com/track/fallback_{i}"},
-                "uri": f"spotify:track:fallback_{i}",
-                "release_date": f"{random.randint(1970, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "image_url": None,
-                "provider": "spotify-fallback",
-                "metadata": {},
-            })
-
-        return results
 
     @staticmethod
     def _extract_playlist_id(reference: str) -> Optional[str]:

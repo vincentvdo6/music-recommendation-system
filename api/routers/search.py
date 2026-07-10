@@ -55,7 +55,7 @@ async def search_songs(
     limit: int = Query(10, ge=1, le=20),
 ):
     """Search for songs using available music providers."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     request_id = getattr(request.state, "request_id", "unknown")
 
     music_service = request.app.state.music
@@ -74,12 +74,12 @@ async def search_songs(
             results=results,
             source=source,
             request_id=request_id,
-            processing_time_ms=int((time.time() - start_time) * 1000),
+            processing_time_ms=int((time.perf_counter() - start_time) * 1000),
         )
 
     except Exception as exc:  # pragma: no cover - defensive catch
-        logger.error("Search failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(exc)}")
+        logger.exception("Search failed")
+        raise HTTPException(status_code=500, detail="Search failed") from exc
 
 
 @router.post("/playlist/recommendations", response_model=PlaylistRecommendationsResponse)
@@ -90,7 +90,7 @@ async def playlist_recommendations(
 ):
     """Generate recommendations from the user's playlist, driven by the searched song."""
 
-    start_time = time.time()
+    start_time = time.perf_counter()
     request_id = getattr(request.state, "request_id", "unknown")
 
     music_service = request.app.state.music
@@ -131,7 +131,7 @@ async def playlist_recommendations(
         algorithm="item2vec retrieval + learned ranking",
         source=source,
         request_id=request_id,
-        processing_time_ms=int((time.time() - start_time) * 1000),
+        processing_time_ms=int((time.perf_counter() - start_time) * 1000),
         playlist=PlaylistSummary(**playlist_info),
     )
 

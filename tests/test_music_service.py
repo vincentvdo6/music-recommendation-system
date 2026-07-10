@@ -112,6 +112,24 @@ async def test_unknown_tracks_dropped_by_enrichment():
     assert [r["id"] for r in recs] == ["r1"]
 
 
+async def test_name_only_playlist_search_does_not_include_none():
+    class QuerySpotify(FakeSpotify):
+        def __init__(self):
+            super().__init__()
+            self.queries = []
+
+        async def search_tracks(self, query: str, limit: int = 10):
+            self.queries.append(query)
+            return [spotify_track("resolved", "Track Name", "Artist")]
+
+    spotify = QuerySpotify()
+    service = MusicService(spotify=spotify, apple=FakeApple(), engine=RecordingEngine([]))
+    resolved = await service._resolve_playlist_tracks([{"name": "Track Name", "artist": None}])
+
+    assert spotify.queries == ["Track Name"]
+    assert list(resolved) == ["resolved"]
+
+
 async def test_empty_playlist_and_no_seed_short_circuits():
     service, _, engine = make_service(["r1"], playlist_catalog())
     recs, source, info = await service.recommend_from_playlist([], seed=None, limit=5)

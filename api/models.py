@@ -31,18 +31,7 @@ class SearchResponse(BaseModel):
     processing_time_ms: int
 
 
-class RecommendationHit(BaseModel):
-    id: str
-    name: str
-    artist: str
-    album: str
-    duration_ms: int
-    popularity: int
-    preview_url: Optional[str] = None
-    external_urls: dict
-    uri: str
-    release_date: str
-    image_url: Optional[str] = None
+class RecommendationHit(Track):
     similarity_score: float
     rank_score: float
     explanation: dict

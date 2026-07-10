@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -46,83 +46,6 @@ class AppleMusicClient:
         payload = await self._fetch_json("/search", params)
         return self._extract_tracks(payload, desired=limit)
 
-    async def lookup_track(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Lookup a specific track by its Apple identifier."""
-        if not track_id:
-            return None
-
-        params = {"id": track_id, "entity": "song", "country": self.country}
-        payload = await self._fetch_json("/lookup", params)
-        tracks = self._extract_tracks(payload, desired=1)
-        return tracks[0] if tracks else None
-
-    async def get_related_tracks(
-        self,
-        *,
-        track_id: Optional[str] = None,
-        track_name: Optional[str] = None,
-        artist_name: Optional[str] = None,
-        limit: int = 5,
-        exclude_ids: Optional[Iterable[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Return tracks that feel related based on artist/metadata."""
-        exclude: set[str] = {str(i) for i in (exclude_ids or [])}
-        candidates: List[Dict[str, Any]] = []
-
-        track: Optional[Dict[str, Any]] = None
-        if track_id:
-            track = await self.lookup_track(track_id)
-
-        if track is None and track_name:
-            track = await self.find_best_match(track_name, artist_name)
-
-        if track:
-            exclude.add(track["id"])
-            artist_id = track.get("metadata", {}).get("apple_artist_id")
-            if artist_id:
-                artist_tracks = await self._lookup_artist_tracks(int(artist_id), limit + 5)
-                candidates.extend(artist_tracks)
-
-        if not candidates and artist_name:
-            artist_results = await self.search_tracks(artist_name, limit + 10)
-            artist_lower = artist_name.lower()
-            exact_matches = [t for t in artist_results if t.get("artist", "").lower() == artist_lower]
-            candidates.extend(exact_matches)
-
-            if len(candidates) < limit and artist_results:
-                similar_matches = [t for t in artist_results if artist_lower in t.get("artist", "").lower()]
-                candidates.extend(similar_matches)
-
-        if not candidates and track_name:
-            query = f"{track_name} {artist_name or ''}".strip()
-            candidates.extend(await self.search_tracks(query, limit + 10))
-
-        if not candidates and artist_name:
-            genre_searches = [
-                f"{artist_name} pop",
-                f"{artist_name} rock",
-                f"{artist_name} indie",
-                f"similar to {artist_name}",
-            ]
-            for search_term in genre_searches:
-                if len(candidates) >= limit:
-                    break
-                results = await self.search_tracks(search_term, limit)
-                candidates.extend(results)
-
-        unique: List[Dict[str, Any]] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            cid = candidate["id"]
-            if cid in exclude or cid in seen:
-                continue
-            seen.add(cid)
-            unique.append(candidate)
-            if len(unique) >= limit:
-                break
-
-        return unique
-
     async def find_best_match(self, track_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Find the most likely Apple track for the given metadata."""
         query = f"{track_name} {artist_name or ''}".strip()
@@ -163,18 +86,9 @@ class AppleMusicClient:
 
         return track
 
-    async def _lookup_artist_tracks(self, artist_id: int, limit: int) -> List[Dict[str, Any]]:
-        params = {
-            "id": artist_id,
-            "entity": "song",
-            "limit": min(max(limit, 1), 50),
-            "country": self.country,
-        }
-        payload = await self._fetch_json("/lookup", params)
-        return self._extract_tracks(payload, desired=limit)
-
     async def _fetch_json(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        assert self._client, "Call start() before using AppleMusicClient"
+        if self._client is None:
+            raise RuntimeError("Call start() before using AppleMusicClient")
         try:
             async with self._sem:
                 response = await self._client.get(f"{self.BASE_URL}{endpoint}", params=params)

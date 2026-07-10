@@ -1,8 +1,7 @@
 """
 Embedding service for track representations.
 
-Provides item2vec embeddings with audio feature fallback.
-Implements fast nearest neighbor search using Annoy.
+Provides item2vec embeddings and fast nearest-neighbor search using Annoy.
 """
 
 import logging
@@ -199,13 +198,19 @@ class ANNIndex:
         with open(id_map_path, 'r') as f:
             self.id_map = json.load(f)
 
+        item_count = self.index.get_n_items()
+        if len(self.id_map) != item_count:
+            raise ValueError(
+                f"ANN ID map has {len(self.id_map)} entries, but the index has {item_count} items"
+            )
+
         self.id_to_pos = {tid: i for i, tid in enumerate(self.id_map)}
         logger.info(f"Loaded ID map with {len(self.id_map):,} tracks")
 
 
 class EmbeddingService:
     """
-    Unified embedding service with item2vec and audio fallback.
+    Unified item2vec embedding service.
 
     Provides fast nearest neighbor search and similarity computation.
     """
@@ -219,7 +224,11 @@ class EmbeddingService:
         self.ann_index: Optional[ANNIndex] = None
 
         if ann_index_path and Path(ann_index_path).exists():
-            self.load_ann_index(ann_index_path)
+            try:
+                self.load_ann_index(ann_index_path)
+            except Exception as exc:
+                logger.warning("ANN index unavailable (%s) — using gensim fallback", exc)
+                self.ann_index = None
 
     def load_ann_index(self, path: str):
         """Load pre-built ANN index."""
@@ -227,8 +236,9 @@ class EmbeddingService:
             logger.warning("Item2vec not loaded, cannot load ANN index")
             return
 
-        self.ann_index = ANNIndex(self.item2vec.dim, metric="angular")
-        self.ann_index.load(path)
+        ann_index = ANNIndex(self.item2vec.dim, metric="angular")
+        ann_index.load(path)
+        self.ann_index = ann_index
 
     def build_ann_index(self, n_trees: int = 50) -> Optional[ANNIndex]:
         """Build ANN index from item2vec embeddings."""
@@ -267,7 +277,7 @@ class EmbeddingService:
         Provide either track_id or embedding vector.
         """
         if self.ann_index is None:
-            logger.warning("ANN index not built, falling back to gensim search")
+            logger.debug("ANN index not built, using gensim search")
             if track_id:
                 neighbors = self.item2vec.neighbors(track_id, k=k)
                 return [tid for tid, _ in neighbors]
@@ -284,22 +294,13 @@ class EmbeddingService:
             return []
 
     def _brute_force_neighbors(self, query_vec: np.ndarray, k: int = 200) -> List[str]:
-        """Brute-force nearest neighbors by computing similarity to all tracks."""
+        """Exact nearest neighbors via gensim's vectorized cosine search."""
         if self.item2vec.wv is None:
             return []
-
-        similarities = []
-        for track_id in self.item2vec.wv.index_to_key:
-            track_vec = self.item2vec.wv[track_id]
-            # Cosine similarity
-            sim = np.dot(query_vec, track_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(track_vec))
-            similarities.append((track_id, sim))
-
-        # Sort by similarity descending
-        similarities.sort(key=lambda x: x[1], reverse=True)
-
-        # Return top-k track IDs
-        return [tid for tid, _ in similarities[:k]]
+        if np.linalg.norm(query_vec) == 0:
+            return []
+        neighbors = self.item2vec.wv.similar_by_vector(query_vec, topn=k)
+        return [track_id for track_id, _ in neighbors]
 
     def get_playlist_neighbors(
         self,
