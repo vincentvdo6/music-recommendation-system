@@ -1,9 +1,9 @@
 """
 Recommendation engine: the one and only serving pipeline.
 
-    ANN retrieval (70% seed / 30% playlist)
+    ANN retrieval (85% seed / 15% playlist)
       -> artist pre-dedup (retrieval order, real artists)
-      -> mood filter (keep top 70% by similarity to the blended target mood)
+      -> mood filter (keep top 55% by similarity to the blended target mood)
       -> vectorized feature matrix (features.FEATURE_NAMES)
       -> ranker (LightGBM LambdaRank, or linear fallback)
       -> top-N with per-track explanations
@@ -39,14 +39,16 @@ MOOD_KEEP_PCT = 0.55      # candidates surviving the mood filter (mirrored in th
 PLAYLIST_VEC_SAMPLE = 100
 PLAYLIST_MOOD_SAMPLE = 50
 
-# Serving-side blend: final = rank_score + λ·seed_i2v_cos − μ·log_pop.
+# Serving-side blend: final = zscore(rank_score) + λ·seed_i2v_cos − μ·log_pop.
 # The ranker optimizes playlist continuation, which under-weights the seed and
 # rewards popular picks; λ pulls results toward the searched song's sound and
-# μ trades chart hits for "surprising but fitting" deeper cuts. Defaults from
-# an eval-sample sweep: λ=3/μ=2 lifts top-10 seed cosine 0.652→0.693 and cuts
-# result popularity for under 2% NDCG@10.
-DEFAULT_SEED_AFFINITY = 3.0
-DEFAULT_DISCOVERY = 2.0
+# μ trades chart hits for "surprising but fitting" deeper cuts. Scores are
+# standardized within each candidate set FIRST so the dials mean the same
+# thing for LightGBM (score std ~1.35) and the 0-1 linear fallback — with raw
+# scores, μ dominated the fallback entirely and surfaced obscure junk.
+# Defaults re-measured in standardized units (≈ the λ=3/μ=2 raw-unit sweep).
+DEFAULT_SEED_AFFINITY = 2.2
+DEFAULT_DISCOVERY = 1.5
 SEED_COS_FLOOR = 0.25     # prefer candidates at least this similar to the seed
 
 FEATURE_LABELS = {
@@ -152,6 +154,9 @@ class RecommendationEngine:
 
         seed_cos = X["seed_i2v_cos"].to_numpy()
         has_seed = ctx.seed_vec is not None
+        if self.seed_affinity or self.discovery:
+            # Standardize so the dials are ranker-agnostic (see constants above).
+            scores = (scores - scores.mean()) / (scores.std() or 1.0)
         if has_seed and self.seed_affinity:
             scores = scores + self.seed_affinity * seed_cos
         if self.discovery:
@@ -173,15 +178,14 @@ class RecommendationEngine:
         for out_pos, i in enumerate(order):
             tid = ids[i]
             row = X.iloc[i]
-            name, artist, duration = tid, "", 0
+            name, artist = tid, ""
+            duration = int(durations[i])
             if meta is not None:
                 meta_row = meta.iloc[out_pos]
                 if isinstance(meta_row.get("name"), str):
                     name = meta_row["name"]
                 if isinstance(meta_row.get("artist"), str):
                     artist = meta_row["artist"]
-                if meta_row.get("duration_ms") == meta_row.get("duration_ms"):  # not NaN
-                    duration = int(meta_row["duration_ms"])
             results.append({
                 "id": tid,
                 "name": name,
@@ -223,12 +227,13 @@ class RecommendationEngine:
         ids = self.track_meta.top_popular(limit)
         meta = self.track_meta.lookup(ids)
         pop = self.track_meta.log_pop(ids)
+        durations = self.track_meta.durations_ms(ids)
         return [
             {
                 "id": tid,
                 "name": meta.iloc[i]["name"],
                 "artist": meta.iloc[i]["artist"],
-                "duration_ms": int(meta.iloc[i]["duration_ms"] or 0),
+                "duration_ms": int(durations[i]),
                 "rank_score": float(pop[i]),
                 "similarity_score": 0.0,
                 "recommendation": {"score": float(pop[i]), "components": {"popularity_prior": float(pop[i])}},

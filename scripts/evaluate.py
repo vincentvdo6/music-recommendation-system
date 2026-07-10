@@ -19,7 +19,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.recommendation.engine import DEFAULT_SEED_AFFINITY  # noqa: E402
+from services.recommendation.engine import DEFAULT_DISCOVERY, DEFAULT_SEED_AFFINITY  # noqa: E402
 from services.recommendation.features import FEATURE_NAMES  # noqa: E402
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker  # noqa: E402
 
@@ -60,12 +60,18 @@ def main() -> int:
         "seed-cosine-only": lambda X: X["seed_i2v_cos"].to_numpy(),
         "retrieval-order": lambda X: -np.arange(len(X), dtype=np.float64),
     }
+    def serving_blend(X):
+        """Mirror the engine: standardized scores + seed-affinity/discovery dials."""
+        s = v2.predict(X)
+        s = (s - s.mean()) / (s.std() or 1.0)
+        return (s + DEFAULT_SEED_AFFINITY * X["seed_i2v_cos"].to_numpy()
+                - DEFAULT_DISCOVERY * X["log_pop"].to_numpy())
+
     try:
         v2 = LightGBMRanker(str(RANKER_PATH))
-        lam = DEFAULT_SEED_AFFINITY
         scorers = {
             "lightgbm-v2": lambda X: v2.predict(X),
-            f"v2+seed-blend(lam={lam:g})": lambda X: v2.predict(X) + lam * X["seed_i2v_cos"].to_numpy(),
+            "v2+serving-dials": serving_blend,
             **scorers,
         }
     except (FileNotFoundError, ValueError) as exc:
@@ -85,6 +91,9 @@ def main() -> int:
             results[name].append(group_metrics(np.asarray(fn(X), dtype=np.float64), y, seed_cos, audio_cos))
 
     n_groups = len(next(iter(results.values())))
+    if n_groups == 0:
+        print("no evaluation groups contain positive labels")
+        return 1
     table = pd.DataFrame({
         name: {k: np.mean([m[k] for m in ms]) for k in ms[0]}
         for name, ms in results.items()
