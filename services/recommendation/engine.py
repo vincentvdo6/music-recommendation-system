@@ -41,21 +41,18 @@ SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
 # pre-rank (the ranker chooses) and the service enforces 1-per-artist after
 # enrichment. Mirrored in the training notebook.
 MOOD_KEEP_PCT = 1.0       # 1.0 = no hard mood cut
-ARTIST_PRECAP = 2         # candidates per artist entering the ranker
+ARTIST_PRECAP: Optional[int] = 2  # candidates per artist entering the ranker; None = uncapped
 PLAYLIST_VEC_SAMPLE = 100
 PLAYLIST_MOOD_SAMPLE = 50
 
-# Serving-side blend: final = zscore(rank_score) + λ·seed_i2v_cos − μ·log_pop.
-# The ranker optimizes playlist continuation, which under-weights the seed and
-# rewards popular picks; λ pulls results toward the searched song's sound and
-# μ trades chart hits for "surprising but fitting" deeper cuts. Scores are
-# standardized within each candidate set FIRST so the dials mean the same
-# thing for LightGBM (score std ~1.35) and the 0-1 linear fallback — with raw
-# scores, μ dominated the fallback entirely and surfaced obscure junk.
-# Defaults re-measured in standardized units (≈ the λ=3/μ=2 raw-unit sweep).
-DEFAULT_SEED_AFFINITY = 2.2
-DEFAULT_DISCOVERY = 1.5
-SEED_COS_FLOOR = 0.25     # prefer candidates at least this similar to the seed
+# The serving score policy (dials, standardization, floor) lives in
+# policy.ScoringPolicy so evaluation measures exactly what serving ships.
+# Constants re-exported for backward compatibility.
+from services.recommendation.policy import (  # noqa: E402
+    DEFAULT_DISCOVERY,
+    DEFAULT_SEED_AFFINITY,
+    ScoringPolicy,
+)
 
 FEATURE_LABELS = {
     "seed_i2v_cos": "often played alongside the seed track",
@@ -105,6 +102,7 @@ class RecommendationEngine:
         self.audio = audio if audio and audio.available else None
         self.seed_affinity = seed_affinity
         self.discovery = discovery
+        self.policy = ScoringPolicy(seed_affinity=seed_affinity, discovery=discovery)
 
     # ------------------------------------------------------------------ API
 
@@ -125,6 +123,11 @@ class RecommendationEngine:
             )
         if not playlist_tracks and not seed_id:
             return []
+
+        # The seed's own row in the playlist would leak into playlist-side
+        # features ("fits the playlist" partly restating "is the seed");
+        # playlist context is everything EXCEPT the seed.
+        playlist_tracks = [t for t in playlist_tracks if t not in (input_track_id, seed_id)]
 
         ids, ctx = self._retrieve(playlist_tracks, seed_id, input_track_id)
         if not ids:
@@ -156,27 +159,11 @@ class RecommendationEngine:
 
         X = F.build_matrix(ids, vectors, artists_norm, log_pop, durations, moods, ncf_scores, ncf_mask, ctx,
                            audio_vecs=audio_vecs)
-        scores = self.ranker.predict(X)
-
         seed_cos = X["seed_i2v_cos"].to_numpy()
         has_seed = ctx.seed_vec is not None
-        if self.seed_affinity or self.discovery:
-            # Standardize so the dials are ranker-agnostic (see constants above).
-            scores = (scores - scores.mean()) / (scores.std() or 1.0)
-        if has_seed and self.seed_affinity:
-            scores = scores + self.seed_affinity * seed_cos
-        if self.discovery:
-            # Dampen the popularity prior: surprising-but-fitting over chart hits.
-            scores = scores - self.discovery * X["log_pop"].to_numpy()
 
-        order = np.argsort(-scores)
-        if has_seed:
-            # Prefer candidates with a minimum sonic kinship to the seed; fall
-            # back to the unfiltered ranking when the floor is too strict.
-            eligible = order[seed_cos[order] >= SEED_COS_FLOOR]
-            if len(eligible) >= limit:
-                order = eligible
-        order = order[:limit]
+        scores = self.policy.blend(self.ranker.predict(X), seed_cos, X["log_pop"].to_numpy(), has_seed)
+        order = self.policy.select(scores, seed_cos, limit, has_seed)
         explanations = self.ranker.explain(X.iloc[order])
 
         meta = self.track_meta.lookup([ids[i] for i in order]) if self.track_meta else None
@@ -326,6 +313,8 @@ class RecommendationEngine:
         ids: List[str], vectors: np.ndarray, artists_norm: List[str]
     ) -> Tuple[List[str], np.ndarray, List[str]]:
         """Cap best-retrieved tracks per known artist; unknown artists pass through."""
+        if ARTIST_PRECAP is None:
+            return ids, vectors, artists_norm
         counts: Dict[str, int] = {}
         keep = []
         for i, artist in enumerate(artists_norm):

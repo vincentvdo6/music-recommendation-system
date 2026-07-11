@@ -106,8 +106,24 @@ async def test_blacklisted_content_is_filtered():
     assert [r["id"] for r in recs] == ["r1"]
 
 
-async def test_unknown_tracks_dropped_by_enrichment():
-    service, _, _ = make_service(["ghost", "r1"], playlist_catalog())
+async def test_unknown_tracks_dropped_then_refilled_from_fallback():
+    # "ghost" is unknown to Spotify; the popular fallback refills the slot
+    # AFTER enrichment instead of returning a short (or empty) list.
+    service, _, engine = make_service(["ghost", "r1"], playlist_catalog())
+    engine.popular_fallback = lambda limit: [
+        {"id": "r2", "name": "r2", "artist": "", "duration_ms": 0, "rank_score": 0.5,
+         "similarity_score": 0.0, "recommendation": {"score": 0.5, "components": {}}, "why": ["popular"]}
+    ]
+    recs, _, _ = await service.recommend_from_playlist(PLAYLIST, seed="spotify:track:p1", limit=2)
+    assert [r["id"] for r in recs] == ["r1", "r2"]
+
+
+async def test_all_recs_unknown_to_spotify_still_returns_fallback():
+    service, _, engine = make_service(["ghost1", "ghost2"], playlist_catalog())
+    engine.popular_fallback = lambda limit: [
+        {"id": "r1", "name": "r1", "artist": "", "duration_ms": 0, "rank_score": 0.5,
+         "similarity_score": 0.0, "recommendation": {"score": 0.5, "components": {}}, "why": ["popular"]}
+    ]
     recs, _, _ = await service.recommend_from_playlist(PLAYLIST, seed="spotify:track:p1", limit=2)
     assert [r["id"] for r in recs] == ["r1"]
 

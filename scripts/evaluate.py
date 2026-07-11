@@ -2,10 +2,15 @@
 Offline A/B over the held-out eval sample exported by the training notebook.
 
 Compares, on identical candidate sets and features:
-  - the shipped LightGBM v2 ranker (if present)
-  - the LinearFallbackRanker (what serves when the model is absent)
+  - the shipped LightGBM ranker, raw AND through the exact served policy
+    (shared ScoringPolicy: standardization + dials + eligible-first floor)
+  - the LinearFallbackRanker through the same served policy
   - seed-cosine-only ordering (equivalent to the old deployed 1-feature model)
   - raw retrieval order
+
+Caveats vs production: the service's Spotify-availability losses and final
+one-per-artist rule are not simulated here (the eval sample carries no
+candidate identities); the training notebook's manifest covers those.
 
 Usage: python scripts/evaluate.py [evaluation/eval_sample.parquet]
 """
@@ -19,16 +24,17 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.recommendation.engine import DEFAULT_DISCOVERY, DEFAULT_SEED_AFFINITY  # noqa: E402
 from services.recommendation.features import FEATURE_NAMES  # noqa: E402
+from services.recommendation.policy import ScoringPolicy  # noqa: E402
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker  # noqa: E402
 
 RANKER_PATH = ROOT / "models" / "ranker" / "lightgbm_ranker_v2.txt"
+POLICY = ScoringPolicy()
 
 
-def group_metrics(scores: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray,
-                  audio_cos: np.ndarray = None, ks=(10, 50)) -> dict:
-    order = np.argsort(-scores)
+def ordered_metrics(order: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray,
+                    audio_cos: np.ndarray = None, ks=(10, 50)) -> dict:
+    """Metrics for an explicit candidate ORDER (so floor/selection effects count)."""
     rel = labels[order]
     out = {}
     for k in ks:
@@ -38,12 +44,26 @@ def group_metrics(scores: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray,
         ideal = np.sort(labels)[::-1][:k]
         idcg = float((ideal / np.log2(np.arange(2, len(ideal) + 2))).sum())
         out[f"ndcg@{k}"] = dcg / idcg if idcg > 0 else 0.0
-    # How close the shown recommendations are to the seed — the "vibe" metrics
-    # that NDCG alone doesn't capture (co-listen cosine and acoustic cosine).
+    out["hit@1"] = float(rel[0] > 0) if len(rel) else 0.0
+    pos = np.nonzero(rel > 0)[0]
+    out["mrr"] = float(1.0 / (pos[0] + 1)) if len(pos) else 0.0
+    # Conditional vibe diagnostics (not quality bars, never coverage-scaled).
     out["seed_cos@10"] = float(seed_cos[order][:10].mean())
     if audio_cos is not None:
         out["audio_cos@10"] = float(audio_cos[order][:10].mean())
     return out
+
+
+def raw_order(scores: np.ndarray) -> np.ndarray:
+    return np.argsort(-np.asarray(scores, dtype=np.float64))
+
+
+def served_order(model_scores, X: pd.DataFrame) -> np.ndarray:
+    """Exactly what engine.recommend ships (full-length order for metrics)."""
+    seed_cos = X["seed_i2v_cos"].to_numpy()
+    blended = POLICY.blend(np.asarray(model_scores, dtype=np.float64),
+                           seed_cos, X["log_pop"].to_numpy(), has_seed=True)
+    return POLICY.select(blended, seed_cos, limit=len(X), has_seed=True)
 
 
 def main() -> int:
@@ -55,29 +75,22 @@ def main() -> int:
     df = pd.read_parquet(sample_path)
     fallback = LinearFallbackRanker()
 
-    scorers = {
-        "linear-fallback": lambda X: fallback.predict(X),
-        "seed-cosine-only": lambda X: X["seed_i2v_cos"].to_numpy(),
-        "retrieval-order": lambda X: -np.arange(len(X), dtype=np.float64),
+    orderers = {
+        "fallback-served": lambda X: served_order(fallback.predict(X), X),
+        "seed-cosine-only": lambda X: raw_order(X["seed_i2v_cos"].to_numpy()),
+        "retrieval-order": lambda X: np.arange(len(X)),
     }
-    def serving_blend(X):
-        """Mirror the engine: standardized scores + seed-affinity/discovery dials."""
-        s = v2.predict(X)
-        s = (s - s.mean()) / (s.std() or 1.0)
-        return (s + DEFAULT_SEED_AFFINITY * X["seed_i2v_cos"].to_numpy()
-                - DEFAULT_DISCOVERY * X["log_pop"].to_numpy())
-
     try:
         v2 = LightGBMRanker(str(RANKER_PATH))
-        scorers = {
-            "lightgbm-v2": lambda X: v2.predict(X),
-            "v2+serving-dials": serving_blend,
-            **scorers,
+        orderers = {
+            "lightgbm-raw": lambda X: raw_order(v2.predict(X)),
+            "lightgbm-served": lambda X: served_order(v2.predict(X), X),
+            **orderers,
         }
     except (FileNotFoundError, ValueError) as exc:
         print(f"note: LightGBM ranker unavailable ({exc}) — comparing baselines only\n")
 
-    results = {name: [] for name in scorers}
+    results = {name: [] for name in orderers}
     for _, group in df.groupby("qid"):
         # Older eval samples may predate newly added features; absent columns
         # zero-fill, matching the "subsystem absent" serving convention.
@@ -87,28 +100,28 @@ def main() -> int:
             continue
         seed_cos = group["seed_i2v_cos"].to_numpy()
         audio_cos = group["audio_cos_seed"].to_numpy() if "audio_cos_seed" in group.columns else None
-        for name, fn in scorers.items():
-            results[name].append(group_metrics(np.asarray(fn(X), dtype=np.float64), y, seed_cos, audio_cos))
+        for name, fn in orderers.items():
+            results[name].append(ordered_metrics(fn(X), y, seed_cos, audio_cos))
 
     n_groups = len(next(iter(results.values())))
     if n_groups == 0:
         print("no evaluation groups contain positive labels")
         return 1
-    table = pd.DataFrame({
-        name: {k: np.mean([m[k] for m in ms]) for k in ms[0]}
-        for name, ms in results.items()
-    }).T.round(4)
-    print(f"{n_groups} evaluation groups\n")
-    print(table.to_string())
+    exact = {name: {k: float(np.mean([m[k] for m in ms])) for k in ms[0]}
+             for name, ms in results.items()}
+    table = pd.DataFrame(exact).T
+    print(f"{n_groups} evaluation groups (survivor-conditional; see notebook manifest for true e2e)\n")
+    print(table.round(4).to_string())
 
-    if "lightgbm-v2" in table.index:
-        # Gate on ranking quality only; the *_cos@10 columns are trade-off
-        # dials, not quality bars (the seed-cosine baseline maximizes them
-        # by definition).
-        quality_cols = [c for c in table.columns if "_cos@" not in c]
-        beats = (table.loc["lightgbm-v2", quality_cols] >= table.loc["seed-cosine-only", quality_cols]).all()
-        print("\ngate:", "PASS — v2 >= seed-cosine baseline on all ranking metrics"
-              if beats else "FAIL — keep the linear fallback and iterate on the notebook")
+    if "lightgbm-served" in exact:
+        # Gate the SERVED policy on unrounded values against the strongest
+        # baseline; *_cos@10 columns are trade-off dials, not quality bars.
+        quality = [c for c in table.columns if "_cos@" not in c]
+        served = exact["lightgbm-served"]
+        baseline = exact["seed-cosine-only"]
+        beats = all(served[c] >= baseline[c] for c in quality)
+        print("\ngate:", "PASS — served policy >= seed-cosine baseline on all ranking metrics"
+              if beats else "FAIL — served policy loses to the seed-cosine baseline")
         return 0 if beats else 2
     return 0
 
