@@ -71,20 +71,27 @@ match — training/serving drift fails loudly, at startup.
 
 ## Offline evaluation
 
-Metrics on held-out playlists (leave-N-out, candidates from the serving
-retrieval path, **seed-graded relevance**: continuations closer to the seed's
-sound are worth more) — from `models/metrics.json`, reproduced locally by
+Metrics are **end-to-end and unconditional**: queries whose positives never
+survive retrieval count as zero-scoring failures instead of being silently
+dropped (the usual way recommender metrics flatter themselves). Held-out
+playlists, leave-N-out, seed-graded relevance, candidates from the exact
+serving retrieval path — from `models/metrics.json`, reproduced locally by
 [`scripts/evaluate.py`](scripts/evaluate.py):
 
-| Ranker | NDCG@10 | Recall@10 | Recall@50 | seed-cos@10 |
-|---|---|---|---|---|
-| **LightGBM LambdaRank (seed-graded + audio)** | **0.409** | **0.558** | **0.893** | 0.681 |
-| seed-cosine only (previous system) | 0.178 | 0.238 | 0.503 | 0.795 |
-| popularity only | 0.185 | 0.299 | 0.713 | 0.663 |
-| raw retrieval order | 0.177 | 0.237 | 0.498 | 0.795 |
+| Ranker | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
+|---|---|---|---|---|---|
+| **LightGBM LambdaRank (seed-graded + audio)** | **0.247** | **0.314** | **0.570** | **0.206** | **0.310** |
+| seed-cosine only (previous system) | 0.101 | 0.122 | 0.270 | 0.092 | 0.150 |
+| popularity only | 0.084 | 0.121 | 0.365 | 0.054 | 0.125 |
+| raw retrieval order | 0.101 | 0.121 | 0.270 | 0.092 | 0.150 |
 
-2.3× the NDCG@10 of the single-signal system it replaced, with Recall@50
-nearly doubled. Serving adds tunable dials on top: `SEED_AFFINITY` (pull
+2.5× the NDCG@10 of the single-signal system it replaced; the single top
+recommendation is a held-out playlist track 21% of the time (Hit@1 matters
+here — the UI promises *one* great recommendation). Seed-only requests (no
+playlist context) are evaluated as their own slice. A stagewise recall funnel
+in `metrics.json` attributes every lost positive to retrieval or a specific
+filter, and an ablation grid over the irreversible filters keeps those choices
+evidence-based. Serving adds tunable dials on top: `SEED_AFFINITY` (pull
 results toward the seed's sound) and `DISCOVERY` (dampen the popularity prior
 for surprising-but-fitting deep cuts).
 
