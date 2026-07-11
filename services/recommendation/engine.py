@@ -51,8 +51,11 @@ PLAYLIST_MOOD_SAMPLE = 50
 from services.recommendation.policy import (  # noqa: E402
     DEFAULT_DISCOVERY,
     DEFAULT_SEED_AFFINITY,
+    SEED_COS_FLOOR,
     ScoringPolicy,
 )
+
+__all_policy__ = (DEFAULT_DISCOVERY, DEFAULT_SEED_AFFINITY, SEED_COS_FLOOR)  # keep re-exports import-visible
 
 FEATURE_LABELS = {
     "seed_i2v_cos": "often played alongside the seed track",

@@ -24,12 +24,15 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.recommendation.features import FEATURE_NAMES  # noqa: E402
-from services.recommendation.policy import ScoringPolicy  # noqa: E402
+from services.recommendation.features import FEATURE_NAMES, MOOD_DIMS  # noqa: E402
+from services.recommendation.policy import load_policy  # noqa: E402
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker  # noqa: E402
 
 RANKER_PATH = ROOT / "models" / "ranker" / "lightgbm_ranker_v2.txt"
-POLICY = ScoringPolicy()
+POLICY = load_policy()  # frozen artifact policy + the same env overrides serving honors
+
+# "Subsystem absent" conventions per feature (see features.build_matrix).
+MISSING_DEFAULTS = {**{f"{d}_diff": 0.5 for d in MOOD_DIMS}, "mood_sim": 0.5, "duration_diff": 1.0}
 
 
 def ordered_metrics(order: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray,
@@ -93,8 +96,12 @@ def main() -> int:
     results = {name: [] for name in orderers}
     for _, group in df.groupby("qid"):
         # Older eval samples may predate newly added features; absent columns
-        # zero-fill, matching the "subsystem absent" serving convention.
-        X = group.reindex(columns=FEATURE_NAMES, fill_value=0.0)
+        # take the same defaults serving uses when a subsystem is missing.
+        X = group.reindex(columns=FEATURE_NAMES)
+        for col, default in MISSING_DEFAULTS.items():
+            if X[col].isna().all():
+                X[col] = default
+        X = X.fillna(0.0)
         y = (group["label"].to_numpy() > 0).astype(float)
         if y.sum() == 0:
             continue
@@ -114,15 +121,20 @@ def main() -> int:
     print(table.round(4).to_string())
 
     if "lightgbm-served" in exact:
-        # Gate the SERVED policy on unrounded values against the strongest
-        # baseline; *_cos@10 columns are trade-off dials, not quality bars.
+        # Gate the SERVED policy on unrounded values against EVERY baseline
+        # ordering; *_cos@10 columns are trade-off dials, not quality bars.
         quality = [c for c in table.columns if "_cos@" not in c]
         served = exact["lightgbm-served"]
-        baseline = exact["seed-cosine-only"]
-        beats = all(served[c] >= baseline[c] for c in quality)
-        print("\ngate:", "PASS — served policy >= seed-cosine baseline on all ranking metrics"
-              if beats else "FAIL — served policy loses to the seed-cosine baseline")
-        return 0 if beats else 2
+        failures = [
+            f"{c} vs {base}"
+            for base in ("seed-cosine-only", "fallback-served")
+            if base in exact
+            for c in quality
+            if served[c] < exact[base][c]
+        ]
+        print("\ngate:", "PASS — served policy >= all baselines on all ranking metrics"
+              if not failures else f"FAIL — served policy loses on: {', '.join(failures)}")
+        return 0 if not failures else 2
     return 0
 
 

@@ -14,13 +14,12 @@ as unavailable). Every other artifact degrades independently:
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
 from services.recommendation.audio_store import AudioStore
 from services.recommendation.embeddings import EmbeddingService
-from services.recommendation.engine import DEFAULT_DISCOVERY, DEFAULT_SEED_AFFINITY, RecommendationEngine
+from services.recommendation.engine import RecommendationEngine
 from services.recommendation.mood import MoodPredictor
 from services.recommendation.ncf import load_item_ncf
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker
@@ -92,15 +91,11 @@ def create_engine(
         except Exception as exc:
             logger.warning("Failed to load audio embeddings: %s", exc)
 
-    def env_float(name: str, default: float) -> float:
-        try:
-            return float(os.getenv(name, default))
-        except ValueError:
-            logger.warning("Invalid %s env value — using default %.1f", name, default)
-            return default
+    # Frozen validation policy from the installed artifact, env vars override.
+    from services.recommendation.policy import load_policy
 
-    seed_affinity = env_float("SEED_AFFINITY", DEFAULT_SEED_AFFINITY)
-    discovery = env_float("DISCOVERY", DEFAULT_DISCOVERY)
+    policy = load_policy()
+    seed_affinity, discovery = policy.seed_affinity, policy.discovery
 
     engine = RecommendationEngine(
         embeddings=embeddings,
@@ -112,6 +107,7 @@ def create_engine(
         seed_affinity=seed_affinity,
         discovery=discovery,
     )
+    engine.policy = policy  # includes the frozen floor as well
 
     logger.info(
         "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | audio: %s | seed_affinity: %.1f | discovery: %.1f",

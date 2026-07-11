@@ -145,8 +145,9 @@ class MusicService:
         if len(recommendations) < limit:
             # Spotify drops and artist dedup can leave us short — refill from
             # the popularity fallback AFTER enrichment, not only before it.
-            have = {r["id"] for r in recommendations}
-            extras = [t for t in self.engine.popular_fallback(limit * 3) if t["id"] not in have]
+            n_engine = len(recommendations)
+            exclude = {r["id"] for r in recommendations} | set(playlist_track_ids) | {input_track_id}
+            extras = [t for t in self.engine.popular_fallback(limit * 3) if t["id"] not in exclude]
             if extras:
                 extras = await self._enrich_with_spotify_metadata(extras)
                 extras = await self._ensure_media_assets(extras)
@@ -154,6 +155,8 @@ class MusicService:
                 if len(merged) > len(recommendations):
                     logger.info("Refilled %d slots from popularity fallback", len(merged) - len(recommendations))
                     recommendations = merged
+            if n_engine == 0 and recommendations:
+                source = "popular-fallback"  # nothing the engine picked survived
 
         playlist_info: Dict[str, Any] = {
             "playlist_size": len(tracks_map),

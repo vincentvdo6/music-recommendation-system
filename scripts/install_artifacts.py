@@ -21,7 +21,10 @@ DESTINATIONS = {
 }
 
 OPTIONAL_DESTINATIONS = {
-    "audio_emb.parquet": ROOT / "models" / "audio",  # present from contract v3 onward
+    "audio_emb.parquet": ROOT / "models" / "audio",   # present from contract v3 onward
+    "group_manifest.parquet": ROOT / "evaluation",    # v11+: dropped-group identities
+    "query_manifest.parquet": ROOT / "evaluation",    # v11+: exact seeds/contexts/positives
+    "policy.json": ROOT / "models",                   # v11+: validation-frozen serving policy
 }
 
 
@@ -65,9 +68,15 @@ def main() -> int:
                 print(f"  {name} -> {dest_dir / name}")
 
     metrics = json.loads((ROOT / "models" / "metrics.json").read_text())
-    print("\noffline metrics (test split):")
-    for scorer, values in metrics["metrics"].items():
-        print(f"  {scorer:>18}: " + "  ".join(f"{k}={v:.4f}" for k, v in values.items()))
+    print("\noffline metrics:")
+    for key, values in metrics.get("metrics", {}).items():
+        if isinstance(values, dict):
+            flat = "  ".join(f"{k}={v:.4f}" for k, v in values.items() if isinstance(v, (int, float)))
+            print(f"  {key:>18}: {flat}")
+        elif isinstance(values, (int, float)):
+            print(f"  {key:>18}: {values:.4f}")
+    if metrics.get("frozen_policy"):
+        print("  frozen policy:", metrics["frozen_policy"])
     print("\nnext: python scripts/evaluate.py && python -m pytest -m slow")
     return 0
 

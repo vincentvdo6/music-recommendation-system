@@ -19,6 +19,44 @@ DEFAULT_SEED_AFFINITY = 2.2
 DEFAULT_DISCOVERY = 1.5
 SEED_COS_FLOOR = 0.25
 
+POLICY_FILE = "models/policy.json"
+
+
+def load_policy(path: str = POLICY_FILE, env: dict | None = None) -> "ScoringPolicy":
+    """Validation-frozen policy from the installed artifact, then env overrides.
+
+    Precedence: env var > models/policy.json > module defaults — the training
+    notebook freezes (lam, mu, floor) on validation; SEED_AFFINITY/DISCOVERY/
+    SEED_COS_FLOOR env vars remain the user-facing dials.
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    env = os.environ if env is None else env
+    lam, mu, floor = DEFAULT_SEED_AFFINITY, DEFAULT_DISCOVERY, SEED_COS_FLOOR
+    p = Path(path)
+    if p.exists():
+        try:
+            frozen = json.loads(p.read_text())
+            lam = float(frozen.get("lam", lam))
+            mu = float(frozen.get("mu", mu))
+            floor = float(frozen.get("floor", floor))
+        except (ValueError, OSError):
+            pass
+
+    def env_float(name: str, default: float) -> float:
+        try:
+            return float(env.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    return ScoringPolicy(
+        seed_affinity=env_float("SEED_AFFINITY", lam),
+        discovery=env_float("DISCOVERY", mu),
+        floor=env_float("SEED_COS_FLOOR", floor),
+    )
+
 
 @dataclass(frozen=True)
 class ScoringPolicy:
