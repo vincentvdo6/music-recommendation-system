@@ -102,9 +102,10 @@ def main() -> int:
     print(table.to_string())
 
     if "lightgbm-v2" in table.index:
-        # Gate on ranking quality only; seed_cos@10 is a trade-off dial, not a
-        # quality bar (the seed-cosine baseline maximizes it by definition).
-        quality_cols = [c for c in table.columns if c != "seed_cos@10"]
+        # Gate on ranking quality only; the *_cos@10 columns are trade-off
+        # dials, not quality bars (the seed-cosine baseline maximizes them
+        # by definition).
+        quality_cols = [c for c in table.columns if "_cos@" not in c]
         beats = (table.loc["lightgbm-v2", quality_cols] >= table.loc["seed-cosine-only", quality_cols]).all()
         print("\ngate:", "PASS — v2 >= seed-cosine baseline on all ranking metrics"
               if beats else "FAIL — keep the linear fallback and iterate on the notebook")

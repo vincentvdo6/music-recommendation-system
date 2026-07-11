@@ -60,6 +60,7 @@ computable offline at serving time:
 | Signal | Source |
 |---|---|
 | Co-listen similarity | item2vec (200-dim, trained on 1M playlists) |
+| **Acoustic similarity** | Discogs-EffNet embeddings of 30s preview clips (46K tracks, PCA-256) — what songs actually *sound* like |
 | Collaborative score | item-NCF (fold-in NeuMF, BPR loss) — scores unseen playlists by mean-pooling |
 | Mood (valence/energy/…) | regression from item2vec embeddings, trained while the audio API existed |
 | Popularity prior, artists, durations | aggregated from the Million Playlist Dataset |
@@ -77,10 +78,10 @@ sound are worth more) — from `models/metrics.json`, reproduced locally by
 
 | Ranker | NDCG@10 | Recall@10 | Recall@50 | seed-cos@10 |
 |---|---|---|---|---|
-| **LightGBM LambdaRank (seed-graded)** | **0.397** | **0.538** | **0.879** | 0.671 |
-| seed-cosine only (previous system) | 0.170 | 0.227 | 0.481 | 0.793 |
-| popularity only | 0.173 | 0.278 | 0.700 | 0.651 |
-| raw retrieval order | 0.169 | 0.227 | 0.474 | 0.793 |
+| **LightGBM LambdaRank (seed-graded + audio)** | **0.409** | **0.558** | **0.893** | 0.681 |
+| seed-cosine only (previous system) | 0.178 | 0.238 | 0.503 | 0.795 |
+| popularity only | 0.185 | 0.299 | 0.713 | 0.663 |
+| raw retrieval order | 0.177 | 0.237 | 0.498 | 0.795 |
 
 2.3× the NDCG@10 of the single-signal system it replaced, with Recall@50
 nearly doubled. Serving adds tunable dials on top: `SEED_AFFINITY` (pull
