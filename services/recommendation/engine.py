@@ -35,7 +35,13 @@ logger = logging.getLogger(__name__)
 RETRIEVAL_POOL = 1000
 SEED_SHARE = 0.85         # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
-MOOD_KEEP_PCT = 0.55      # candidates surviving the mood filter (mirrored in the notebook)
+# Hard filters are deliberately soft: mood features earn ~2% of model gain,
+# so a mood veto mostly destroyed candidate recall (funnel measurements);
+# the ranker's mood_sim feature handles coherence. Artist diversity keeps 2
+# pre-rank (the ranker chooses) and the service enforces 1-per-artist after
+# enrichment. Mirrored in the training notebook.
+MOOD_KEEP_PCT = 1.0       # 1.0 = no hard mood cut
+ARTIST_PRECAP = 2         # candidates per artist entering the ranker
 PLAYLIST_VEC_SAMPLE = 100
 PLAYLIST_MOOD_SAMPLE = 50
 
@@ -319,14 +325,14 @@ class RecommendationEngine:
     def _artist_dedup(
         ids: List[str], vectors: np.ndarray, artists_norm: List[str]
     ) -> Tuple[List[str], np.ndarray, List[str]]:
-        """Keep the best-retrieved track per known artist; unknown artists pass through."""
-        seen_artists = set()
+        """Cap best-retrieved tracks per known artist; unknown artists pass through."""
+        counts: Dict[str, int] = {}
         keep = []
         for i, artist in enumerate(artists_norm):
             if artist:
-                if artist in seen_artists:
+                if counts.get(artist, 0) >= ARTIST_PRECAP:
                     continue
-                seen_artists.add(artist)
+                counts[artist] = counts.get(artist, 0) + 1
             keep.append(i)
         if len(keep) == len(ids):
             return ids, vectors, artists_norm

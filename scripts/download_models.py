@@ -25,6 +25,7 @@ ARTIFACTS = {
     "lightgbm_ranker_v2.txt": "models/ranker",
     "ncf_item_v2.pt": "models/ncf",
     "track_meta.parquet": "models/meta",
+    "audio_emb.parquet": "models/audio",
 }
 
 

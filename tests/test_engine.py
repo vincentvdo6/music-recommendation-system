@@ -45,10 +45,14 @@ def test_different_seeds_produce_different_recommendations(engine):
     assert recs_a != recs_b
 
 
-def test_artist_dedup_one_track_per_artist(engine, track_meta):
+def test_artist_precap_limits_candidates_per_artist(engine, track_meta):
+    from services.recommendation.engine import ARTIST_PRECAP
+
     recs = engine.recommend(playlist_of("t", 5), input_track_id="t10", limit=10)
     artists = [track_meta.lookup([r["id"]])["artist_norm"].iloc[0] for r in recs]
-    assert len(artists) == len(set(artists))
+    counts = {a: artists.count(a) for a in artists}
+    assert max(counts.values()) <= ARTIST_PRECAP
+    # final 1-per-artist diversity is the service layer's job post-enrichment
 
 
 def test_proxy_seed_used_when_track_not_in_model(engine):
