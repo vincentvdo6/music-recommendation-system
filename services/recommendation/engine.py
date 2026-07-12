@@ -33,7 +33,11 @@ from services.recommendation.track_meta import TrackMetaStore
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_POOL = 1000
-K_AUDIO = 300             # extra audio-ANN candidates when the seed has an audio vector
+# Extra audio-ANN candidates when the seed has an audio vector. Sized from the
+# calibration set: human-picked scene-swappable tracks sit at audio rank
+# ~3.5-4K of 65K (a-cos ~0.42) — a channel that can't reach that depth can't
+# surface them. Candidate features are vectorized; 5K rows rank in ~ms.
+K_AUDIO = 4000
 SEED_SHARE = 0.70         # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
 # Hard filters are deliberately soft: mood features earn ~2% of model gain,

@@ -55,6 +55,10 @@ class TrackMetaStore:
         or the standard COLUMNS schema; base rows win on id conflict.
         Extension tracks carry playlist_count=0 — no popularity prior."""
         df = pd.read_parquet(path)
+        if "embedded" in df.columns:
+            # Only tracks with an audio vector are reachable through any
+            # channel — unembedded harvest rows would be dead catalog weight.
+            df = df[df["embedded"]]
         if "id" in df.columns and "title" in df.columns:  # raw harvest export
             artist = df.get("artist_mpd", pd.Series("", index=df.index)).fillna("")
             fallback = df.get("artist_deezer", pd.Series("", index=df.index)).fillna("")

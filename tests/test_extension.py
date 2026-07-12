@@ -64,6 +64,11 @@ def test_meta_extension_maps_harvest_schema(track_meta, tmp_path):
          "artist_deezer": "Artist 0 ", "artist_mpd": "Artist 0", "duration_ms": 185000,
          "pos": 7, "stage": "artist", "kind": "mpd_ext", "matched_track_id": "extmpd1",
          "embedded": True},
+        # No audio vector -> unreachable by any channel -> must be filtered out.
+        {"id": "dz:999", "deezer_id": 999, "title": "Never Embedded",
+         "artist_deezer": "Nobody", "artist_mpd": "", "duration_ms": 100000,
+         "pos": 90, "stage": "artist", "kind": "new", "matched_track_id": "",
+         "embedded": False},
     ])
     path = tmp_path / "extension_tracks.parquet"
     ext.to_parquet(path)
