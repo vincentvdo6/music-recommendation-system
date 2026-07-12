@@ -34,6 +34,8 @@ NCF_PATH = "models/ncf/ncf_item_v2.pt"
 TRACK_META_PATH = "models/meta/track_meta.parquet"
 MOOD_PATH = "models/mood_predictor/mood_predictor.pkl"
 AUDIO_EMB_PATH = "models/audio/audio_emb.parquet"
+EXTENSION_TRACKS_PATH = "models/extension/extension_tracks.parquet"
+EXTENSION_AUDIO_PATH = "models/extension/extension_audio_emb.parquet"
 
 
 def create_engine(
@@ -91,6 +93,22 @@ def create_engine(
         except Exception as exc:
             logger.warning("Failed to load audio embeddings: %s", exc)
 
+    # Extension catalog (harvested beyond the MPD vocabulary) — both halves
+    # optional; the audio-ANN retrieval channel reaches whatever loads.
+    n_extension = 0
+    if track_meta.available and Path(EXTENSION_TRACKS_PATH).exists():
+        try:
+            before = len(track_meta._df)
+            track_meta.load_extension(EXTENSION_TRACKS_PATH)
+            n_extension = len(track_meta._df) - before
+        except Exception as exc:
+            logger.warning("Failed to load extension tracks: %s", exc)
+    if audio.available and Path(EXTENSION_AUDIO_PATH).exists():
+        try:
+            audio.load_extension(EXTENSION_AUDIO_PATH)
+        except Exception as exc:
+            logger.warning("Failed to load extension audio embeddings: %s", exc)
+
     # Frozen validation policy from the installed artifact, env vars override.
     from services.recommendation.policy import load_policy
 
@@ -110,7 +128,7 @@ def create_engine(
     engine.policy = policy  # includes the frozen floor as well
 
     logger.info(
-        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | audio: %s | seed_affinity: %.1f | discovery: %.1f",
+        "Engine capabilities | embeddings: %d tracks | ann: %s | ranker: %s | ncf: %s | track_meta: %s | mood: %s | audio: %s | extension: %s | seed_affinity: %.1f | discovery: %.1f",
         len(embeddings.item2vec.wv),
         "yes" if embeddings.ann_index else "no (gensim fallback)",
         ranker.name,
@@ -118,6 +136,7 @@ def create_engine(
         "yes" if track_meta.available else "no",
         "yes" if mood.available else "no",
         f"{audio.size} tracks" if audio.available else "no",
+        f"{n_extension} tracks" if n_extension else "no",
         seed_affinity,
         discovery,
     )

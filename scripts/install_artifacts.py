@@ -25,6 +25,8 @@ OPTIONAL_DESTINATIONS = {
     "group_manifest.parquet": ROOT / "evaluation",    # v11+: dropped-group identities
     "query_manifest.parquet": ROOT / "evaluation",    # v11+: exact seeds/contexts/positives
     "policy.json": ROOT / "models",                   # v11+: validation-frozen serving policy
+    "extension_tracks.parquet": ROOT / "models" / "extension",     # catalog expansion
+    "extension_audio_emb.parquet": ROOT / "models" / "extension",  # catalog expansion
 }
 
 

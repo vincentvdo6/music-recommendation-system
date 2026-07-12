@@ -33,6 +33,7 @@ from services.recommendation.track_meta import TrackMetaStore
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_POOL = 1000
+K_AUDIO = 300             # extra audio-ANN candidates when the seed has an audio vector
 SEED_SHARE = 0.70         # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
 # Hard filters are deliberately soft: mood features earn ~2% of model gain,
@@ -133,7 +134,8 @@ class RecommendationEngine:
         # playlist context is everything EXCEPT the seed.
         playlist_tracks = [t for t in playlist_tracks if t not in (input_track_id, seed_id)]
 
-        ids, ctx = self._retrieve(playlist_tracks, seed_id, input_track_id)
+        seed_audio_vec = self._seed_audio(seed_id, input_artist_name, input_track_id)
+        ids, ctx = self._retrieve(playlist_tracks, seed_id, input_track_id, seed_audio_vec)
         if not ids:
             logger.warning("No candidates retrieved (playlist outside model vocabulary)")
             return []
@@ -158,7 +160,8 @@ class RecommendationEngine:
         audio_vecs = None
         if self.audio:
             audio_vecs, _ = self.audio.matrix_for(ids)
-            ctx.seed_audio_vec = self._seed_audio(seed_id, input_artist_name)
+            # ctx.seed_audio_vec was set during retrieval (same vector feeds
+            # the audio channel and the audio_cos_seed feature).
             ctx.playlist_audio_mean = self.audio.mean_vector(playlist_tracks[:PLAYLIST_VEC_SAMPLE])
 
         X = F.build_matrix(ids, vectors, artists_norm, log_pop, durations, moods, ncf_scores, ncf_mask, ctx,
@@ -241,14 +244,20 @@ class RecommendationEngine:
 
     # ------------------------------------------------------------ internals
 
-    def _seed_audio(self, seed_id: Optional[str], input_artist_name: Optional[str]):
-        """Seed's preview embedding — direct, else via a same-artist track with audio."""
+    def _seed_audio(self, seed_id: Optional[str], input_artist_name: Optional[str],
+                    input_track_id: Optional[str] = None):
+        """Seed's preview embedding. The SEARCHED track's own audio comes first:
+        an out-of-vocab seed (post-2017 release, deep cut) may still have a real
+        audio vector from the extension harvest — that, not the i2v proxy's
+        sound, is what the audio channel should chase. Then the resolved seed,
+        then any same-artist track with audio."""
         if not self.audio:
             return None
-        if seed_id is not None:
-            vec = self.audio.vector(seed_id)
-            if vec is not None:
-                return vec
+        for tid in (input_track_id, seed_id):
+            if tid is not None:
+                vec = self.audio.vector(tid)
+                if vec is not None:
+                    return vec
         if input_artist_name and self.track_meta:
             for cand in self.track_meta.tracks_by_artist(input_artist_name, limit=20):
                 vec = self.audio.vector(cand)
@@ -270,11 +279,16 @@ class RecommendationEngine:
         return None, False
 
     def _retrieve(
-        self, playlist_tracks: List[str], seed_id: Optional[str], input_track_id: Optional[str]
+        self,
+        playlist_tracks: List[str],
+        seed_id: Optional[str],
+        input_track_id: Optional[str],
+        seed_audio_vec: Optional[np.ndarray] = None,
     ) -> Tuple[List[str], F.RankingContext]:
         ctx = F.RankingContext()
         seed_neighbors: List[str] = []
         playlist_neighbors: List[str] = []
+        audio_neighbors: List[str] = []
         if seed_id:
             # Seed-only mode gets the entire pool from the seed's neighbors.
             k_seed = RETRIEVAL_POOL if not playlist_tracks else int(RETRIEVAL_POOL * SEED_SHARE)
@@ -286,6 +300,12 @@ class RecommendationEngine:
             ctx.seed_vec = self.embeddings.item2vec.vector(seed_id)
         elif playlist_tracks:
             playlist_neighbors = self.embeddings.get_playlist_neighbors(playlist_tracks, k=RETRIEVAL_POOL)
+
+        # Second retrieval channel: what SOUNDS like the seed, age-blind.
+        # Reaches tracks with no co-occurrence vector at all (extension catalog).
+        if self.audio and seed_audio_vec is not None:
+            audio_neighbors = self.audio.nearest(seed_audio_vec, k=K_AUDIO)
+        ctx.seed_audio_vec = seed_audio_vec
 
         ctx.seed_rank = {tid: rank for rank, tid in enumerate(seed_neighbors)}
         ctx.playlist_rank = {tid: rank for rank, tid in enumerate(playlist_neighbors)}
@@ -301,7 +321,7 @@ class RecommendationEngine:
         exclude = set(playlist_tracks) | {seed_id, input_track_id, None}
         seen = set()
         ids = []
-        for tid in [*seed_neighbors, *playlist_neighbors]:
+        for tid in [*seed_neighbors, *playlist_neighbors, *audio_neighbors]:
             if tid not in exclude and tid not in seen:
                 seen.add(tid)
                 ids.append(tid)

@@ -49,6 +49,39 @@ class TrackMetaStore:
         self._log_pop_denom = float(np.log1p(max(df["playlist_count"].max(), 1)))
         logger.info("Loaded track metadata for %d tracks from %s", len(df), path)
 
+    def load_extension(self, path: str) -> None:
+        """Append extension-catalog rows (harvested tracks outside the MPD
+        table). Accepts the harvest export schema (id/title/artist_deezer)
+        or the standard COLUMNS schema; base rows win on id conflict.
+        Extension tracks carry playlist_count=0 — no popularity prior."""
+        df = pd.read_parquet(path)
+        if "id" in df.columns and "title" in df.columns:  # raw harvest export
+            artist = df.get("artist_mpd", pd.Series("", index=df.index)).fillna("")
+            fallback = df.get("artist_deezer", pd.Series("", index=df.index)).fillna("")
+            df = pd.DataFrame({
+                "track_id": df["id"],
+                "name": df["title"],
+                "artist": artist.where(artist != "", fallback),
+                "duration_ms": df["duration_ms"].fillna(0),
+                "playlist_count": 0,
+            })
+        missing = [c for c in COLUMNS if c not in df.columns]
+        if missing:
+            raise ValueError(f"extension parquet missing columns: {missing}")
+        if "track_id" in df.columns:
+            df = df.set_index("track_id")
+        df = df[COLUMNS].copy()
+        df["artist_norm"] = df["artist"].fillna("").str.lower().str.strip()
+        if self._df is None:
+            self._df = df
+            self._log_pop_denom = float(np.log1p(max(df["playlist_count"].max(), 1)))
+        else:
+            df = df[~df.index.isin(self._df.index)]
+            self._df = pd.concat([self._df, df])
+        self._artist_groups = None
+        logger.info("Extended track metadata with %d rows from %s (total %d)",
+                    len(df), path, len(self._df))
+
     def lookup(self, ids: List[str]) -> pd.DataFrame:
         """Rows aligned to ids; NaN rows for unknown tracks."""
         if self._df is None:
