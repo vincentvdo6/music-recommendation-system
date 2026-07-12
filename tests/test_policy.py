@@ -32,6 +32,34 @@ def test_floor_is_eligible_first_then_fills():
     assert order.tolist() == [1, 3, 0]
 
 
+def test_fixed_scale_divides_by_frozen_std():
+    """The 'fixed' arm centers per query but scales by the validation-frozen
+    global std — dial units stay comparable across queries with tight or wide
+    score spreads (query_z would stretch a tight spread to unit variance)."""
+    scores = np.array([1.0, 1.1, 0.9])  # tight spread, std ~0.08
+    seed_cos = np.array([0.0, 0.0, 1.0])
+    zeros = np.zeros(3)
+    fixed = ScoringPolicy(seed_affinity=1.0, discovery=0.0, floor=0.0,
+                          scale="fixed", fixed_std=2.0)
+    query_z = ScoringPolicy(seed_affinity=1.0, discovery=0.0, floor=0.0)
+    # Under fixed scaling the tiny score gaps shrink and the seed term wins;
+    # under query_z the same gaps inflate to unit variance and scores win.
+    assert np.argmax(fixed.blend(scores, seed_cos, zeros, has_seed=True)) == 2
+    assert np.argmax(query_z.blend(scores, seed_cos, zeros, has_seed=True)) == 1
+
+
+def test_load_policy_reads_frozen_scale(tmp_path):
+    frozen = tmp_path / "policy.json"
+    frozen.write_text('{"lam": 2.2, "mu": 1.0, "floor": 0.25, '
+                      '"scale": "fixed", "fixed_std": 1.609}')
+    from services.recommendation.policy import load_policy
+
+    policy = load_policy(path=str(frozen), env={})
+    assert policy.scale == "fixed"
+    assert policy.fixed_std == 1.609
+    assert policy.discovery == 1.0
+
+
 def test_floor_ignored_without_seed():
     policy = ScoringPolicy(seed_affinity=0.0, discovery=0.0, floor=0.5)
     blended = np.array([1.0, 2.0, 3.0])

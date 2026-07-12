@@ -45,14 +45,18 @@ def test_different_seeds_produce_different_recommendations(engine):
     assert recs_a != recs_b
 
 
-def test_artist_precap_limits_candidates_per_artist(engine, track_meta):
-    from services.recommendation.engine import ARTIST_PRECAP
+def test_artist_precap_uncapped_by_default_capped_when_set(engine, track_meta, monkeypatch):
+    # v11 funnel ablation: pre-caps destroyed candidate recall, so the default
+    # is uncapped and the service layer owns 1-per-artist post-enrichment.
+    from services.recommendation import engine as engine_mod
 
+    assert engine_mod.ARTIST_PRECAP is None
+
+    monkeypatch.setattr(engine_mod, "ARTIST_PRECAP", 2)
     recs = engine.recommend(playlist_of("t", 5), input_track_id="t10", limit=10)
     artists = [track_meta.lookup([r["id"]])["artist_norm"].iloc[0] for r in recs]
     counts = {a: artists.count(a) for a in artists}
-    assert max(counts.values()) <= ARTIST_PRECAP
-    # final 1-per-artist diversity is the service layer's job post-enrichment
+    assert max(counts.values()) <= 2
 
 
 def test_proxy_seed_used_when_track_not_in_model(engine):

@@ -33,15 +33,16 @@ from services.recommendation.track_meta import TrackMetaStore
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_POOL = 1000
-SEED_SHARE = 0.85         # fraction of the pool retrieved from the seed's neighbors
+SEED_SHARE = 0.70         # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
 # Hard filters are deliberately soft: mood features earn ~2% of model gain,
 # so a mood veto mostly destroyed candidate recall (funnel measurements);
-# the ranker's mood_sim feature handles coherence. Artist diversity keeps 2
-# pre-rank (the ranker chooses) and the service enforces 1-per-artist after
-# enrichment. Mirrored in the training notebook.
+# the ranker's mood_sim feature handles coherence. Artist pre-caps destroyed
+# recall the same way (funnel ablation), so the ranker sees everything and
+# the service enforces 1-per-artist after enrichment. Mirrored in the
+# training notebook — retrain if these change.
 MOOD_KEEP_PCT = 1.0       # 1.0 = no hard mood cut
-ARTIST_PRECAP: Optional[int] = 2  # candidates per artist entering the ranker; None = uncapped
+ARTIST_PRECAP: Optional[int] = None  # candidates per artist entering the ranker; None = uncapped
 PLAYLIST_VEC_SAMPLE = 100
 PLAYLIST_MOOD_SAMPLE = 50
 

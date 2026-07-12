@@ -35,6 +35,7 @@ def load_policy(path: str = POLICY_FILE, env: dict | None = None) -> "ScoringPol
 
     env = os.environ if env is None else env
     lam, mu, floor = DEFAULT_SEED_AFFINITY, DEFAULT_DISCOVERY, SEED_COS_FLOOR
+    scale, fixed_std = "query_z", 1.0
     p = Path(path)
     if p.exists():
         try:
@@ -42,6 +43,8 @@ def load_policy(path: str = POLICY_FILE, env: dict | None = None) -> "ScoringPol
             lam = float(frozen.get("lam", lam))
             mu = float(frozen.get("mu", mu))
             floor = float(frozen.get("floor", floor))
+            scale = str(frozen.get("scale", scale))
+            fixed_std = float(frozen.get("fixed_std", fixed_std))
         except (ValueError, OSError):
             pass
 
@@ -55,6 +58,8 @@ def load_policy(path: str = POLICY_FILE, env: dict | None = None) -> "ScoringPol
         seed_affinity=env_float("SEED_AFFINITY", lam),
         discovery=env_float("DISCOVERY", mu),
         floor=env_float("SEED_COS_FLOOR", floor),
+        scale=scale,
+        fixed_std=fixed_std,
     )
 
 
@@ -63,6 +68,10 @@ class ScoringPolicy:
     seed_affinity: float = DEFAULT_SEED_AFFINITY
     discovery: float = DEFAULT_DISCOVERY
     floor: float = SEED_COS_FLOOR
+    # "query_z" divides by the per-query score std; "fixed" divides by the
+    # validation-frozen global std so the dials keep one meaning across queries.
+    scale: str = "query_z"
+    fixed_std: float = 1.0
 
     def blend(
         self,
@@ -71,11 +80,14 @@ class ScoringPolicy:
         log_pop: np.ndarray,
         has_seed: bool,
     ) -> np.ndarray:
-        """zscore(model) + λ·seed_cos − μ·log_pop (standardization makes the
-        dials mean the same thing for LightGBM and the 0-1 linear fallback)."""
+        """standardize(model) + λ·seed_cos − μ·log_pop (standardization makes
+        the dials mean the same thing for LightGBM and the 0-1 linear fallback).
+        Mirrors the training notebook's policy_order — scores are centered per
+        query either way; the divisor is what the frozen scale arm chooses."""
         blended = np.asarray(scores, dtype=np.float64)
         if self.seed_affinity or self.discovery:
-            blended = (blended - blended.mean()) / (blended.std() or 1.0)
+            divisor = self.fixed_std if self.scale == "fixed" else blended.std()
+            blended = (blended - blended.mean()) / (divisor or 1.0)
         if has_seed and self.seed_affinity:
             blended = blended + self.seed_affinity * seed_cos
         if self.discovery:

@@ -74,26 +74,33 @@ match — training/serving drift fails loudly, at startup.
 Metrics are **end-to-end and unconditional**: queries whose positives never
 survive retrieval count as zero-scoring failures instead of being silently
 dropped (the usual way recommender metrics flatter themselves). Held-out
-playlists, leave-N-out, seed-graded relevance, candidates from the exact
-serving retrieval path — from `models/metrics.json`, reproduced locally by
+playlists, leave-N-out, candidates from the exact serving retrieval path,
+scored through the exact serving policy — from `models/metrics.json`,
+survivor-conditional slice reproduced locally by
 [`scripts/evaluate.py`](scripts/evaluate.py):
 
-| Ranker | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
+| System (true end-to-end, test) | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
 |---|---|---|---|---|---|
-| **LightGBM LambdaRank (seed-graded + audio)** | **0.247** | **0.314** | **0.570** | **0.206** | **0.310** |
-| seed-cosine only (previous system) | 0.101 | 0.122 | 0.270 | 0.092 | 0.150 |
-| popularity only | 0.084 | 0.121 | 0.365 | 0.054 | 0.125 |
-| raw retrieval order | 0.101 | 0.121 | 0.270 | 0.092 | 0.150 |
+| **This release — with playlist context** | **0.156** | **0.110** | **0.209** | **0.229** | **0.332** |
+| **This release — seed-only** | **0.184** | **0.034** | **0.089** | **0.286** | **0.393** |
+| previous release, exact-served — with playlist | 0.108 | 0.075 | 0.131 | 0.161 | 0.246 |
+| previous release, exact-served — seed-only | 0.154 | 0.029 | 0.069 | 0.217 | 0.327 |
 
-2.5× the NDCG@10 of the single-signal system it replaced; the single top
-recommendation is a held-out playlist track 21% of the time (Hit@1 matters
-here — the UI promises *one* great recommendation). Seed-only requests (no
-playlist context) are evaluated as their own slice. A stagewise recall funnel
-in `metrics.json` attributes every lost positive to retrieval or a specific
-filter, and an ablation grid over the irreversible filters keeps those choices
-evidence-based. Serving adds tunable dials on top: `SEED_AFFINITY` (pull
-results toward the seed's sound) and `DISCOVERY` (dampen the popularity prior
-for surprising-but-fitting deep cuts).
+The upgrade is gated on a paired bootstrap against the previous system served
+exactly as it ran: **+0.039 NDCG@10, 95% CI [+0.036, +0.043]** — the win comes
+from a wider, uncapped candidate funnel, not from grading on a curve. The
+single top recommendation is a held-out playlist track 23–29% of the time
+(Hit@1 matters here — the UI promises *one* great recommendation). Seed-only
+requests (no playlist context) are their own slice with their own funnel.
+
+The serving policy is frozen on validation, not hand-tuned: a grid over the
+`SEED_AFFINITY` and `DISCOVERY` dials, constrained to keep seed similarity at
+parity with the previous system and popularity below its served level, trades
+~1 point of raw NDCG@10 (0.168 → 0.156) for recommendations that stay close to
+the seed's sound and lean discovery. Ablations in `metrics.json` are honest:
+the audio and mood features are ranking-neutral on this test set (their value
+is audible, not measurable in NDCG), and a per-mode stagewise funnel
+attributes every lost positive to retrieval or a specific filter.
 
 ## Running it
 
