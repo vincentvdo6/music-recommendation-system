@@ -49,6 +49,24 @@ def recommend(seed_id: str, limit: int) -> list:
     return resp.json()["recommendations"]
 
 
+def catalog_id_for(engine, track: dict) -> str:
+    """The id the local catalog knows this track by. Usually the Spotify id;
+    extension tracks harvested without a Spotify match live under dz: ids and
+    are found by normalized artist + name."""
+    tid = track["id"]
+    if engine.audio and engine.audio.vector(tid) is not None:
+        return tid
+    if engine.track_meta is not None:
+        df = engine.track_meta._df
+        if tid in df.index:
+            return tid
+        cand = df[(df["artist_norm"] == track["artist"].lower().strip())
+                  & (df["name"].str.lower() == track["name"].lower())]
+        if len(cand):
+            return cand.index[0]
+    return tid
+
+
 def analyze(engine, seed_query: str, target_queries: list) -> dict:
     """Print the diagnostic table; return calibration stats for this set."""
     wv = engine.embeddings.item2vec
@@ -66,16 +84,43 @@ def analyze(engine, seed_query: str, target_queries: list) -> dict:
     seed_vec = wv.vector(seed_id)
     seed_unit = seed_vec / np.linalg.norm(seed_vec)
     neighbor_rank = {tid: i for i, tid in enumerate(engine.embeddings.get_neighbors(track_id=seed_id, k=1000))}
-    seed_mood = engine.mood.predict(seed_vec.reshape(1, -1))[0] if engine.mood else None
+
+    # The second retrieval channel: what the seed SOUNDS like, age-blind.
+    seed_audio = engine._seed_audio(seed_id, seed["artist"], seed["id"]) if engine.audio else None
+    audio_rank = {}
+    if seed_audio is not None:
+        from services.recommendation.engine import K_AUDIO
+
+        audio_rank = {tid: i for i, tid in enumerate(engine.audio.nearest(seed_audio, k=K_AUDIO))}
+        src = "direct" if engine.audio.vector(seed["id"]) is not None else "proxy"
+        print(f"  audio seed: {src} ({len(audio_rank)} audio-ANN candidates)")
+    else:
+        print("  audio seed: none — audio channel inactive for this seed")
 
     recs = recommend(seed["id"], HIT_RATE_K)
-    rec_ids = [r["id"] for r in recs]
-    reachable = hits = 0
+    rec_ids = set(r["id"] for r in recs)
+    reachable = hits = reachable_audio = 0
 
-    print(f"\n{'TARGET':44s} {'in-model':>8s} {'seed-cos':>8s} {'ANN-rank':>8s} {'mood-d':>6s} {'pop':>4s}")
+    print(f"\n{'TARGET':44s} {'i2v':>4s} {'seed-cos':>8s} {'ANN-rank':>8s} "
+          f"{'audio':>5s} {'a-cos':>6s} {'a-rank':>6s} {'pop':>4s}")
     for t in targets:
         label = f"{t['name'][:28]} — {t['artist'][:12]}"
-        if not wv.has_vector(t["id"]):
+        cid = catalog_id_for(engine, t)
+        in_i2v = wv.has_vector(cid)
+        a_vec = engine.audio.vector(cid) if engine.audio else None
+        in_audio = a_vec is not None
+
+        cos = rank = None
+        if in_i2v:
+            vec = wv.vector(cid)
+            cos = float(vec / np.linalg.norm(vec) @ seed_unit)
+            rank = neighbor_rank.get(cid)
+        a_cos = a_rank = None
+        if in_audio and seed_audio is not None:
+            a_cos = float(a_vec @ seed_audio / (np.linalg.norm(seed_audio) or 1.0))
+            a_rank = audio_rank.get(cid)
+
+        if not in_i2v and not in_audio:
             proxy = None
             if engine.track_meta:
                 for cand in engine.track_meta.tracks_by_artist(t["artist"], limit=20):
@@ -83,19 +128,20 @@ def analyze(engine, seed_query: str, target_queries: list) -> dict:
                         proxy = cand
                         break
             note = "artist known" if proxy else "artist unknown too"
-            print(f"{label:44s} {'NO':>8s}   -> unreachable by co-occurrence ({note})")
+            print(f"{label:44s} {'NO':>4s} {'':>8s} {'':>8s} {'NO':>5s}   -> unreachable "
+                  f"by BOTH channels ({note})")
             continue
+
         reachable += 1
-        hits += t["id"] in rec_ids
-        vec = wv.vector(t["id"])
-        cos = float(vec / np.linalg.norm(vec) @ seed_unit)
-        rank = neighbor_rank.get(t["id"])
-        mood_d = "-"
-        if seed_mood is not None and engine.mood:
-            tm = engine.mood.predict(vec.reshape(1, -1))[0]
-            mood_d = f"{np.abs(tm - seed_mood).mean():.3f}"
-        print(f"{label:44s} {'yes':>8s} {cos:8.3f} {str(rank) if rank is not None else '>1000':>8s} "
-              f"{mood_d:>6s} {t['popularity']:>4d}")
+        reachable_audio += in_audio
+        hits += (t["id"] in rec_ids) or (cid in rec_ids)
+        print(f"{label:44s} {'yes' if in_i2v else 'NO':>4s} "
+              f"{f'{cos:.3f}' if cos is not None else '-':>8s} "
+              f"{str(rank) if rank is not None else ('>1000' if in_i2v else '-'):>8s} "
+              f"{'yes' if in_audio else 'NO':>5s} "
+              f"{f'{a_cos:.3f}' if a_cos is not None else '-':>6s} "
+              f"{str(a_rank) if a_rank is not None else ('miss' if in_audio and seed_audio is not None else '-'):>6s} "
+              f"{t['popularity']:>4d}")
 
     print("\nWHAT THE ENGINE RETURNS (seed-only mode):")
     for i, rec in enumerate(recs[:10], 1):
@@ -103,6 +149,8 @@ def analyze(engine, seed_query: str, target_queries: list) -> dict:
         print(f"  {i:2d}. {rec['name'][:34]:34s} — {rec['artist'][:18]:18s} "
               f"sim={rec['similarity_score']:.3f} pop={rec['popularity']:>3d}  [{why}]")
 
+    if reachable_audio:
+        print(f"\n  ({reachable_audio} target(s) reachable through the audio channel)")
     return {"reachable": reachable, "hits": hits, "targets": len(targets)}
 
 
@@ -128,8 +176,8 @@ def main() -> int:
                 totals[k] += stats[k]
         print("=" * 78)
         print(f"\nSYNC TEST: {totals['reachable']}/{totals['targets']} targets reachable "
-              f"(in vocabulary), {totals['hits']}/{totals['targets']} surfaced in the top {HIT_RATE_K}.")
-        print("Unreachable targets need the catalog-expansion phase, not better ranking.")
+              f"(either channel), {totals['hits']}/{totals['targets']} surfaced in the top {HIT_RATE_K}.")
+        print("Unreachable targets need the catalog-expansion harvest, not better ranking.")
         return 0
 
     if len(args) < 2:
