@@ -26,6 +26,7 @@ ARTIFACTS = {
     "ncf_item_v2.pt": "models/ncf",
     "track_meta.parquet": "models/meta",
     "audio_emb.parquet": "models/audio",
+    "policy.json": "models",  # validation-frozen serving policy (dials + scale)
 }
 
 
