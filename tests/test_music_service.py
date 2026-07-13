@@ -180,3 +180,70 @@ def test_extract_spotify_id_variants():
     assert extract("4uLU6hMCjMI75M1A2tKUQC") == "4uLU6hMCjMI75M1A2tKUQC"
     assert extract("not a track") is None
     assert extract(None) is None
+
+
+class ExtensionEngine(RecordingEngine):
+    """Engine whose recs include an extension-catalog (dz:) track."""
+
+    def recommend(self, playlist_tracks, input_track_id=None, input_artist_name=None,
+                  input_track_name=None, limit=20):
+        super().recommend(playlist_tracks, input_track_id=input_track_id,
+                          input_artist_name=input_artist_name,
+                          input_track_name=input_track_name, limit=limit)
+        base = {"rank_score": 1.0, "similarity_score": 0.5,
+                "recommendation": {"score": 1.0, "components": {}}, "why": ["test"]}
+        return [
+            {"id": "r1", "name": "Rec One", "artist": "X", "duration_ms": 210000, **base},
+            {"id": "dz:900", "name": "fake prophet", "artist": "Tai Verdes",
+             "duration_ms": 169000, **base},
+        ]
+
+
+class SearchableSpotify(FakeSpotify):
+    def __init__(self, tracks, search_results):
+        super().__init__(tracks)
+        self.search_results = search_results
+        self.search_calls: List[str] = []
+
+    async def search_tracks(self, query: str, limit: int = 10):
+        self.search_calls.append(query)
+        return self.search_results
+
+
+async def test_extension_dz_track_resolved_by_search():
+    hit = spotify_track("sp_fp", "fake prophet", "Tai Verdes")
+    hit["duration_ms"] = 168500
+    spotify = SearchableSpotify(playlist_catalog(), [hit])
+    service = MusicService(spotify=spotify, apple=FakeApple(), engine=ExtensionEngine([]))
+
+    recs, _, _ = await service.recommend_from_playlist([], seed="spotify:track:seed1", limit=5)
+    ids = [r["id"] for r in recs]
+    assert "sp_fp" in ids            # dz:900 served under its Spotify identity
+    assert not any(i.startswith("dz:") for i in ids)
+    resolved = next(r for r in recs if r["id"] == "sp_fp")
+    assert resolved["rank_score"] == 1.0  # engine scores survive the merge
+    # the dz: id never entered a /tracks bulk chunk (it would 400 the batch)
+    assert all("dz:900" not in call for call in spotify.bulk_calls)
+
+
+async def test_extension_dz_track_unresolvable_is_dropped_and_cached():
+    wrong = spotify_track("sp_x", "completely different", "Someone Else")
+    spotify = SearchableSpotify(playlist_catalog(), [wrong])
+    service = MusicService(spotify=spotify, apple=FakeApple(), engine=ExtensionEngine([]))
+
+    recs, _, _ = await service.recommend_from_playlist([], seed="spotify:track:seed1", limit=5)
+    assert not any(r["id"].startswith(("dz:", "sp_x")) for r in recs)
+
+    await service.recommend_from_playlist([], seed="spotify:track:seed1", limit=5)
+    assert len(spotify.search_calls) == 1  # negative result cached per process
+
+
+async def test_extension_duration_mismatch_rejected():
+    # right name and artist, but a 3x-length version (live/extended) — reject
+    hit = spotify_track("sp_long", "fake prophet", "Tai Verdes")
+    hit["duration_ms"] = 500000
+    spotify = SearchableSpotify(playlist_catalog(), [hit])
+    service = MusicService(spotify=spotify, apple=FakeApple(), engine=ExtensionEngine([]))
+
+    recs, _, _ = await service.recommend_from_playlist([], seed="spotify:track:seed1", limit=5)
+    assert not any(r["id"] == "sp_long" for r in recs)

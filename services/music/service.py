@@ -35,6 +35,9 @@ class MusicService:
         self.spotify = spotify
         self.apple = apple or AppleMusicClient()
         self.engine = get_engine() if engine is _UNSET else engine
+        # dz:<id> -> Spotify track dict (or None): extension-catalog tracks
+        # resolved lazily at serving time; negative results cached too.
+        self._ext_resolutions: Dict[str, Optional[Dict[str, Any]]] = {}
 
         if self.engine:
             logger.info("MusicService initialized with recommendation engine")
@@ -294,6 +297,43 @@ class MusicService:
 
         return diverse_tracks
 
+    @staticmethod
+    def _match_norm(s: str) -> str:
+        return "".join(ch for ch in (s or "").casefold() if ch.isalnum() or ch == " ").strip()
+
+    async def _resolve_extension_track(self, track: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extension-catalog tracks carry Deezer-derived ids (dz:...) — find
+        their Spotify identity by search, at most once per process. Only
+        served tracks pay this cost (a handful per request, cached)."""
+        key = track["id"]
+        if key in self._ext_resolutions:
+            return self._ext_resolutions[key]
+        real = None
+        name, artist = track.get("name") or "", track.get("artist") or ""
+        if name and artist:
+            try:
+                candidates = await self.spotify.search_tracks(f"{name} {artist}", limit=5)
+            except Exception as exc:
+                logger.warning("Extension resolution search failed for %s: %s", key, exc)
+                candidates = []
+            want_artist, want_title = self._match_norm(artist), self._match_norm(name)
+            for cand in candidates:
+                got_artist = self._match_norm(cand.get("artist") or "")
+                got_title = self._match_norm(cand.get("name") or "")
+                if want_artist not in (got_artist, "") and got_artist not in (want_artist, ""):
+                    continue
+                if want_title not in got_title and got_title not in want_title:
+                    continue
+                dur, cand_dur = track.get("duration_ms") or 0, cand.get("duration_ms") or 0
+                if dur and cand_dur and abs(dur - cand_dur) > 10_000:
+                    continue
+                real = cand
+                break
+        self._ext_resolutions[key] = real
+        if real is None:
+            logger.info("Extension track %s (%s — %s) has no Spotify identity", key, name, artist)
+        return real
+
     async def _enrich_with_spotify_metadata(self, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Attach live Spotify metadata (album, artwork, popularity, links) to
@@ -303,8 +343,15 @@ class MusicService:
         if not tracks or not self.spotify:
             return tracks
 
-        ids = [t["id"] for t in tracks if t.get("id")]
+        # Extension-catalog ids are not Spotify ids — one in a /tracks batch
+        # would invalidate the whole chunk. They resolve by search instead.
+        ids = [t["id"] for t in tracks if t.get("id") and not t["id"].startswith("dz:")]
         spotify_tracks = await self.spotify.get_tracks_bulk(ids)
+        for track in tracks:
+            if (track.get("id") or "").startswith("dz:"):
+                real = await self._resolve_extension_track(track)
+                if real:
+                    spotify_tracks[track["id"]] = real
 
         enriched: List[Dict[str, Any]] = []
         for track in tracks:
