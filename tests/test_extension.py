@@ -192,3 +192,69 @@ def test_seed_audio_prefers_the_searched_tracks_own_vector(
     vec = engine._seed_audio("t10", "Artist 5", "spotify_new_song")
     assert vec is not None
     assert vec[1] > 0.9  # the track's own (u-axis) sound, not t10's t-axis audio
+
+
+# ----------------------------------------------------------- contract v4
+
+
+def test_channel_indicator_features(embeddings, track_meta, audio_store, tmp_path):
+    import services.recommendation.features as F
+
+    ext_audio = pd.DataFrame([_audio_row("dz:902", axis=0)])
+    ext_audio.to_parquet(tmp_path / "ea4.parquet")
+    audio_store.load_extension(str(tmp_path / "ea4.parquet"))
+    ext_meta = pd.DataFrame([
+        {"id": "dz:902", "deezer_id": 902, "title": "Channel Test",
+         "artist_deezer": "Ghost", "artist_mpd": "", "duration_ms": 200000,
+         "pos": 0, "stage": "related", "kind": "new", "matched_track_id": "",
+         "embedded": True},
+    ])
+    ext_meta.to_parquet(tmp_path / "et4.parquet")
+    track_meta.load_extension(str(tmp_path / "et4.parquet"))
+
+    engine = _engine_with_audio(embeddings, track_meta, audio_store)
+    seed_audio = engine._seed_audio("t10", None)
+    ids, ctx = engine._retrieve([], "t10", "t10", seed_audio)
+    assert "dz:902" in ids and ctx.audio_rank  # audio channel populated
+
+    vectors = engine._vectors(ids)
+    X = F.build_matrix(ids, vectors, track_meta.artists(ids),
+                       track_meta.log_pop(ids), track_meta.durations_ms(ids),
+                       None, None, None, ctx,
+                       audio_vecs=audio_store.matrix_for(ids)[0])
+    row = X.iloc[ids.index("dz:902")]
+    assert row["has_i2v"] == 0.0        # no co-occurrence vector by design
+    assert row["audio_seed_rr"] > 0.0   # retrieved by the audio channel
+    assert row["has_audio"] == 1.0
+    in_vocab = X.iloc[ids.index([i for i in ids if i.startswith("t")][0])]
+    assert in_vocab["has_i2v"] == 1.0
+
+    # effective seed cos: acoustic for the extension row, co-listen otherwise
+    eff = F.effective_seed_cos(X)
+    i = ids.index("dz:902")
+    assert eff[i] == row["audio_cos_seed"]
+    j = ids.index([x for x in ids if x.startswith("t")][0])
+    assert eff[j] == X.iloc[j]["seed_i2v_cos"]
+
+
+def test_extension_track_passes_default_floor(embeddings, track_meta, audio_store, tmp_path):
+    # v4 policy floors extension candidates on ACOUSTIC closeness — a sound-
+    # twin extension track is eligible under the default policy, no override.
+    ext_audio = pd.DataFrame([_audio_row("dz:903", axis=0)])
+    ext_audio.to_parquet(tmp_path / "ea5.parquet")
+    audio_store.load_extension(str(tmp_path / "ea5.parquet"))
+    ext_meta = pd.DataFrame([
+        {"id": "dz:903", "deezer_id": 903, "title": "Twin", "artist_deezer": "Ghost",
+         "artist_mpd": "", "duration_ms": 200000, "pos": 0, "stage": "related",
+         "kind": "new", "matched_track_id": "", "embedded": True},
+    ])
+    ext_meta.to_parquet(tmp_path / "et5.parquet")
+    track_meta.load_extension(str(tmp_path / "et5.parquet"))
+
+    engine = _engine_with_audio(embeddings, track_meta, audio_store)
+    recs = engine.recommend([], input_track_id="t10", limit=60)
+    ranks = {r["id"]: i for i, r in enumerate(recs)}
+    assert "dz:903" in ranks
+    # audio cos ~1.0 to the seed: it must NOT be relegated to ineligible filler
+    # (the old i2v floor pushed every extension track behind all 29 eligibles)
+    assert ranks["dz:903"] < 29

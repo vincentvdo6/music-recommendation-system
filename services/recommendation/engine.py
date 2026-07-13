@@ -84,6 +84,8 @@ FEATURE_LABELS = {
     "audio_cos_seed": "sounds like the seed track",
     "audio_cos_playlist": "sounds like your playlist",
     "has_audio": "audio analyzed",
+    "has_i2v": "known from playlist history",
+    "audio_seed_rr": "a top acoustic neighbor of the seed",
 }
 
 
@@ -170,8 +172,10 @@ class RecommendationEngine:
 
         X = F.build_matrix(ids, vectors, artists_norm, log_pop, durations, moods, ncf_scores, ncf_mask, ctx,
                            audio_vecs=audio_vecs)
-        seed_cos = X["seed_i2v_cos"].to_numpy()
-        has_seed = ctx.seed_vec is not None
+        # Closeness-to-seed per candidate's channel: co-listen cosine for
+        # in-vocab tracks, acoustic cosine for extension-catalog tracks.
+        seed_cos = F.effective_seed_cos(X)
+        has_seed = ctx.seed_vec is not None or ctx.seed_audio_vec is not None
 
         scores = self.policy.blend(self.ranker.predict(X), seed_cos, X["log_pop"].to_numpy(), has_seed)
         order = self.policy.select(scores, seed_cos, limit, has_seed)
@@ -310,6 +314,7 @@ class RecommendationEngine:
         if self.audio and seed_audio_vec is not None:
             audio_neighbors = self.audio.nearest(seed_audio_vec, k=K_AUDIO)
         ctx.seed_audio_vec = seed_audio_vec
+        ctx.audio_rank = {tid: rank for rank, tid in enumerate(audio_neighbors)}
 
         ctx.seed_rank = {tid: rank for rank, tid in enumerate(seed_neighbors)}
         ctx.playlist_rank = {tid: rank for rank, tid in enumerate(playlist_neighbors)}

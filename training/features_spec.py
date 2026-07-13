@@ -1,5 +1,5 @@
 """
-Ranking feature contract (v3).
+Ranking feature contract (v4).
 
 FEATURE_NAMES is the single source of truth for the ranker feature vector.
 The Kaggle training notebook mirrors this list (training/features_spec.py);
@@ -7,11 +7,12 @@ the shipped LightGBM model's feature names are asserted against it at load
 time, so serving and training cannot silently drift apart.
 
 Every feature here is computable at serving time from:
-  - item2vec embeddings (always present for retrieved candidates)
-  - ANN retrieval ranks
+  - item2vec embeddings (zero rows for extension-catalog candidates)
+  - ANN retrieval ranks (co-occurrence AND audio channels)
   - the item-NCF model (optional)
   - the MPD-derived track metadata table (optional)
   - the embedding-based mood predictor (optional)
+  - preview audio embeddings (optional; the second retrieval channel)
 
 No deprecated Spotify audio-features API anywhere. When an optional
 subsystem is missing, its features collapse to a constant for the whole
@@ -48,6 +49,8 @@ FEATURE_NAMES: List[str] = [
     "audio_cos_seed",       # acoustic cosine(candidate, seed) from preview embeddings
     "audio_cos_playlist",   # acoustic cosine(candidate, playlist audio mean)
     "has_audio",            # 1 if candidate has an audio embedding AND a reference exists
+    "has_i2v",              # 1 if candidate has an item2vec vector (extension tracks: 0)
+    "audio_seed_rr",        # 1/(rank+1) in the seed's audio-ANN neighbor list
 ]
 
 # Canonical order of mood-predictor output dimensions.
@@ -85,6 +88,18 @@ class RankingContext:
     playlist_mean_duration_ms: float = 0.0
     seed_audio_vec: Optional[np.ndarray] = None      # (256,) preview embedding of the seed
     playlist_audio_mean: Optional[np.ndarray] = None # (256,) mean over playlist audio vectors
+    audio_rank: Dict[str, int] = field(default_factory=dict)     # id -> 0-based audio-ANN rank
+
+
+def effective_seed_cos(X: pd.DataFrame) -> np.ndarray:
+    """The policy's per-candidate closeness-to-seed: co-listen cosine when the
+    candidate lives in the item2vec vocabulary, acoustic cosine otherwise
+    (extension-catalog candidates have no co-occurrence signal by design).
+    Shared verbatim by serving, evaluation, and the training notebook so the
+    frozen dials/floor mean the same thing everywhere."""
+    return np.where(X["has_i2v"].to_numpy() > 0,
+                    X["seed_i2v_cos"].to_numpy(),
+                    X["audio_cos_seed"].to_numpy()).astype(np.float64)
 
 
 def build_matrix(
@@ -200,5 +215,11 @@ def build_matrix(
         out["audio_cos_seed"] = np.zeros(n, dtype=np.float32)
         out["audio_cos_playlist"] = np.zeros(n, dtype=np.float32)
         out["has_audio"] = np.zeros(n, dtype=np.float32)
+
+    # Channel indicators: which retrieval channel(s) know this candidate.
+    out["has_i2v"] = (np.abs(np.asarray(vectors, dtype=np.float32)).sum(axis=1) > 0).astype(np.float32)
+    out["audio_seed_rr"] = np.array(
+        [1.0 / (ctx.audio_rank[i] + 1) if i in ctx.audio_rank else 0.0 for i in ids], dtype=np.float32
+    )
 
     return pd.DataFrame(out, columns=FEATURE_NAMES)

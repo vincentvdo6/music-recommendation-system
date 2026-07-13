@@ -81,6 +81,7 @@ class LinearFallbackRanker:
         "artist_in_playlist": 0.02,
         "mood_sim": 0.10,
         "audio_cos_seed": 0.15,
+        "audio_seed_rr": 0.03,  # acoustic-channel retrieval strength
     }
 
     def __init__(self, weights: Dict[str, float] | None = None):

@@ -24,7 +24,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.recommendation.features import FEATURE_NAMES, MOOD_DIMS  # noqa: E402
+from services.recommendation.features import FEATURE_NAMES, MOOD_DIMS, effective_seed_cos  # noqa: E402
 from services.recommendation.policy import load_policy  # noqa: E402
 from services.recommendation.ranker import LightGBMRanker, LinearFallbackRanker  # noqa: E402
 
@@ -32,7 +32,10 @@ RANKER_PATH = ROOT / "models" / "ranker" / "lightgbm_ranker_v2.txt"
 POLICY = load_policy()  # frozen artifact policy + the same env overrides serving honors
 
 # "Subsystem absent" conventions per feature (see features.build_matrix).
-MISSING_DEFAULTS = {**{f"{d}_diff": 0.5 for d in MOOD_DIMS}, "mood_sim": 0.5, "duration_diff": 1.0}
+# Pre-v4 eval samples lack the channel indicators: those candidates all came
+# from the i2v channel, so has_i2v defaults to 1 and audio_seed_rr to 0.
+MISSING_DEFAULTS = {**{f"{d}_diff": 0.5 for d in MOOD_DIMS}, "mood_sim": 0.5, "duration_diff": 1.0,
+                    "has_i2v": 1.0, "audio_seed_rr": 0.0}
 
 
 def ordered_metrics(order: np.ndarray, labels: np.ndarray, seed_cos: np.ndarray,
@@ -63,7 +66,7 @@ def raw_order(scores: np.ndarray) -> np.ndarray:
 
 def served_order(model_scores, X: pd.DataFrame) -> np.ndarray:
     """Exactly what engine.recommend ships (full-length order for metrics)."""
-    seed_cos = X["seed_i2v_cos"].to_numpy()
+    seed_cos = effective_seed_cos(X)
     blended = POLICY.blend(np.asarray(model_scores, dtype=np.float64),
                            seed_cos, X["log_pop"].to_numpy(), has_seed=True)
     return POLICY.select(blended, seed_cos, limit=len(X), has_seed=True)
