@@ -1,0 +1,3 @@
+# Kaggle training notebooks are pipeline documentation; as JSON they dwarf
+# the source tree by bytes and distort GitHub's language statistics.
+*.ipynb linguist-documentation
