@@ -1,19 +1,33 @@
 // 30-second preview player with Spotify-embed fallback.
 
 export class Player {
-  constructor({ audioEl, playBtn, metaEl, volumeEl, embedWrap }) {
+  constructor({ audioEl, playBtn, metaEl, volumeEl, embedWrap, onEvent = () => {} }) {
     this.audio = audioEl;
     this.playBtn = playBtn;
     this.metaEl = metaEl;
     this.embedWrap = embedWrap;
+    this.onEvent = onEvent;
+    this.started = false;
+    this.completed = false;
+    this.handled = false;
 
     this.audio.volume = volumeEl.value / 100;
     volumeEl.addEventListener("input", () => { this.audio.volume = volumeEl.value / 100; });
 
     this.playBtn.addEventListener("click", () => this.toggle());
-    this.audio.addEventListener("play", () => this.#setPlaying(true));
+    this.audio.addEventListener("play", () => {
+      this.#setPlaying(true);
+      const event = this.completed ? "replay" : "preview_start";
+      this.started = true;
+      this.completed = false;
+      this.onEvent(event);
+    });
     this.audio.addEventListener("pause", () => this.#setPlaying(false));
-    this.audio.addEventListener("ended", () => this.#setPlaying(false));
+    this.audio.addEventListener("ended", () => {
+      this.#setPlaying(false);
+      this.completed = true;
+      this.onEvent("preview_complete");
+    });
     this.audio.addEventListener("error", () => {
       this.metaEl.textContent = "Preview playback failed";
       this.playBtn.disabled = true;
@@ -37,6 +51,9 @@ export class Player {
   load(track) {
     this.audio.pause();
     this.#setPlaying(false);
+    this.started = false;
+    this.completed = false;
+    this.handled = false;
 
     if (track.preview_url) {
       this.audio.src = track.preview_url;
@@ -50,6 +67,18 @@ export class Player {
       this.metaEl.textContent = "No preview — use the Spotify player:";
       this.#showEmbed(track.id);
     }
+  }
+
+  wasSkipped() {
+    return this.started && !this.completed && !this.handled;
+  }
+
+  markHandled() {
+    this.handled = true;
+  }
+
+  wasHandled() {
+    return this.handled;
   }
 
   #showEmbed(trackId) {

@@ -9,29 +9,41 @@ import time
 import webbrowser
 
 
-def open_browser_delayed():
+def open_browser_delayed(url: str):
     """Open browser after server starts."""
     time.sleep(3)
     try:
-        webbrowser.open("http://localhost:8000")
+        webbrowser.open(url)
         print("Browser opened automatically!")
     except Exception:
-        print("Please open http://localhost:8000 in your browser")
+        print(f"Please open {url} in your browser")
+
+
+def configured_port() -> int:
+    try:
+        port = int(os.getenv("PORT", "8000"))
+    except ValueError as exc:
+        raise SystemExit("PORT must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise SystemExit("PORT must be between 1 and 65535")
+    return port
 
 
 def main():
+    port = configured_port()
+    url = f"http://localhost:{port}"
     print("Music Recommendation System")
     print("=" * 30)
     print()
 
     # Open browser in background
-    browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
+    browser_thread = threading.Thread(target=open_browser_delayed, args=(url,), daemon=True)
     browser_thread.start()
 
     print("Starting server...")
-    print("   Website: http://localhost:8000")
-    print("   API Docs: http://localhost:8000/docs")
-    print("   Health: http://localhost:8000/health")
+    print(f"   Website: {url}")
+    print(f"   API Docs: {url}/docs")
+    print(f"   Health: {url}/health")
     print()
     print("Press Ctrl+C to stop")
     print()
@@ -42,7 +54,7 @@ def main():
             sys.executable, "-m", "uvicorn",
             "api.main:app",
             "--host", "0.0.0.0",
-            "--port", "8000",
+            "--port", str(port),
             "--reload",
             "--no-access-log",
         ]

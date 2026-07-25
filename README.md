@@ -23,10 +23,10 @@ flowchart LR
     API --> ENGINE["Recommendation engine"]
 
     subgraph ENGINE_DETAIL ["services/recommendation"]
-        RETRIEVE["ANN retrieval<br/>70% seed / 30% playlist<br/>(Annoy over item2vec)"]
-        FEATURES["17-feature matrix<br/>(vectorized, numpy)"]
+        RETRIEVE["candidate retrieval<br/>seed + playlist mean (item2vec)<br/>+ exact acoustic neighbors"]
+        FEATURES["22-feature matrix<br/>(vectorized, numpy)"]
         RANK["LightGBM LambdaRank<br/>(linear fallback)"]
-        DIVERSITY["artist diversity<br/>+ mood filter"]
+        DIVERSITY["acoustic discovery slots<br/>+ artist / era diversity"]
         RETRIEVE --> FEATURES --> RANK --> DIVERSITY
     end
 
@@ -37,15 +37,19 @@ flowchart LR
     DIVERSITY --> SPOTIFY["Spotify metadata<br/>enrichment"]
 ```
 
-1. **Retrieval** — the searched song ("seed") drives 70% of the ~1,000-candidate
-   pool via its Annoy neighbors; the playlist mean vector supplies the rest.
-   Seeds outside the vocabulary fall back to a same-artist proxy track.
-2. **Ranking** — every candidate gets a 17-feature vector (seed/playlist
+1. **Retrieval** — the searched song ("seed") drives 70% of the collaborative
+   pool via its Annoy neighbors; the mean of the remaining playlist supplies
+   the rest. Exact acoustic neighbors add sound-alikes from the preview
+   embedding catalog, and newer seeds can use a same-artist collaborative
+   proxy when they fall outside the 2017 playlist vocabulary.
+2. **Ranking** — every candidate gets a 22-feature vector (seed/playlist
    cosines, ANN reciprocal ranks, item-NCF score, MPD popularity prior, artist
-   overlap, mood similarity, duration fit) scored by a LambdaRank model trained
-   on leave-N-out playlist continuation with **the exact serving retrieval**.
-3. **Diversity** — one track per artist, mood-filtered, then enriched with live
-   Spotify metadata (artwork, previews, links).
+   overlap, mood similarity, duration fit, acoustic similarity and channel
+   availability) scored by a LambdaRank model trained on leave-N-out playlist
+   continuation with **the exact serving retrieval**.
+3. **Serving** — an independent acoustic lane reserves a few discovery
+   slots, then deep over-fetching, Spotify identity resolution, one-per-artist
+   and a soft era cap produce a full playable list. Apple fills missing media.
 
 Every recommendation ships its explanation — the top SHAP-style feature
 contributions — and the similarity shown in the UI is the real seed cosine,
@@ -65,9 +69,9 @@ computable offline at serving time:
 | Mood (valence/energy/…) | regression from item2vec embeddings, trained while the audio API existed |
 | Popularity prior, artists, durations | aggregated from the Million Playlist Dataset |
 
-A byte-identical feature spec is shared between serving and the training
-notebook, and the model loader refuses any artifact whose feature names don't
-match — training/serving drift fails loudly, at startup.
+A byte-identical feature specification is shared between serving and the
+training notebook. The model loader refuses feature-name mismatches so
+training/serving drift fails safely.
 
 ## Offline evaluation
 
@@ -86,7 +90,7 @@ survivor-conditional slice reproduced locally by
 | previous release, exact-served — with playlist | 0.108 | 0.075 | 0.131 | 0.161 | 0.246 |
 | previous release, exact-served — seed-only | 0.154 | 0.029 | 0.069 | 0.217 | 0.327 |
 
-The upgrade is gated on a paired bootstrap against the previous system served
+The published production upgrade is gated on a paired bootstrap against the previous system served
 exactly as it ran: **+0.039 NDCG@10, 95% CI [+0.036, +0.043]** — the win comes
 from a wider, uncapped candidate funnel, not from grading on a curve. The
 single top recommendation is a held-out playlist track 23–29% of the time
@@ -102,6 +106,10 @@ the audio and mood features are ranking-neutral on this test set (their value
 is audible, not measurable in NDCG), and a per-mode stagewise funnel
 attributes every lost positive to retrieval or a specific filter.
 
+New candidates must carry a completed paired release gate. The installer reads
+that decision before writing any model file, so a survivor-conditional local
+win cannot replace production after losing the true end-to-end comparison.
+
 ## Running it
 
 ```bash
@@ -111,6 +119,9 @@ cp .env.example .env                  # add your Spotify client credentials
 python run_local.py                   # http://localhost:8000
 ```
 
+If port 8000 is occupied, PowerShell can launch another verified instance with
+`$env:PORT=8001; python run_local.py`.
+
 Or with Docker (models stay volume-mounted, never baked into the image):
 
 ```bash
@@ -119,6 +130,17 @@ docker compose up --build
 
 Spotify credentials come from a free [developer app](https://developer.spotify.com/dashboard)
 and are only used for search + display metadata.
+
+The seed page exposes three serving profiles: **Closest match** (the default),
+**Balanced**, and **Explorer**. They are bounded post-ranking policies, so changing profile does
+not change the trained feature or retrieval contracts. Likes, dislikes,
+playback events, “More like this,” and “More similar” tune subsequent results
+inside the current anonymous browser session. Feedback influence decays with a
+24-hour half-life, and tracks shown during the last day are rotated out of
+refreshed slates so tuning does not simply return the same list. Preview skips,
+completions, and replays are distinguished automatically.
+Neutral feedback is logged for analysis but applies no positive or negative
+session adjustment and is excluded from training labels.
 
 ## Training
 
@@ -133,6 +155,7 @@ a free GPU session (~3h). See [training/README.md](training/README.md).
 | `GET` | `/api/v1/search` | track search (Spotify, Apple fallback) |
 | `POST` | `/api/v1/playlist/import` | resolve a public playlist URL to entries |
 | `POST` | `/api/v1/playlist/recommendations` | seed-driven recommendations |
+| `POST` | `/api/v1/feedback` | local, anonymous impression feedback |
 | `GET` | `/health` | health check |
 
 ## Tests
@@ -140,6 +163,9 @@ a free GPU session (~3h). See [training/README.md](training/README.md).
 ```bash
 pytest -m "not slow"    # fast suite, fake model stack (runs in CI)
 pytest -m slow          # loads the real 2.3 GB artifacts, asserts the feature contract
+python scripts/evaluate_profiles.py  # compare the three serving profiles offline
+python scripts/report_feedback.py    # compare live profile/session outcomes
+python scripts/export_feedback.py    # export IPS-weighted candidate feedback
 ```
 
 ## Stack

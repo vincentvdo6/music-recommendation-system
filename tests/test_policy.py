@@ -75,7 +75,7 @@ def test_engine_and_evaluator_share_the_policy():
     from scripts import evaluate
     from services.recommendation import engine
 
-    assert "self.policy.blend" in inspect.getsource(engine.RecommendationEngine.recommend)
-    assert "self.policy.select" in inspect.getsource(engine.RecommendationEngine.recommend)
-    assert "POLICY.blend" in inspect.getsource(evaluate.served_order)
-    assert "POLICY.select" in inspect.getsource(evaluate.served_order)
+    assert "policy.blend" in inspect.getsource(engine.RecommendationEngine.recommend)
+    assert "policy.select" in inspect.getsource(engine.RecommendationEngine.recommend)
+    assert "policy.blend" in inspect.getsource(evaluate.served_order)
+    assert "policy.select" in inspect.getsource(evaluate.served_order)

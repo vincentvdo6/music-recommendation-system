@@ -10,11 +10,11 @@ static/ (vanilla ES modules, strict CSP)
   → api/main.py → api/routers/search.py
   → services/music/service.py            (orchestration + Spotify enrichment)
   → services/recommendation/engine.py    (THE pipeline)
-      retrieve (70% seed ANN / 30% playlist ANN, Annoy)
-      → artist dedup → mood filter
-      → features.build_matrix (17 features, vectorized)
-      → ranker (LightGBM v2, LinearFallbackRanker if absent)
-      → top-N + SHAP-style explanations
+      retrieve (70% seed ANN / 30% playlist mean + exact acoustic neighbors)
+      → features.build_matrix (22 features, vectorized)
+      → shared LambdaRank model (linear fallback)
+      → acoustic discovery reservation → deep enrichment → artist/era diversity
+      → top-N + SHAP-style explanations + anonymous impression feedback
 ```
 
 ## Key modules
@@ -51,6 +51,8 @@ python -m pytest -m "not slow" -q          # fast suite (fake model stack) — C
 python -m pytest -m slow -q                # real artifacts, feature-contract assertions
 python scripts/evaluate.py                 # offline A/B on evaluation/eval_sample.parquet
 python scripts/install_artifacts.py X.zip  # install Kaggle training output
+python scripts/export_feedback.py          # local SQLite → IPS-weighted parquet
+python scripts/report_feedback.py          # summarize live anonymous outcomes
 python scripts/download_models.py          # fetch model weights from GitHub release
 ```
 
@@ -65,6 +67,8 @@ Windows: use `C:\Users\Vincent\AppData\Local\Programs\Python\Python312\python.ex
 - `ncf/ncf_item_v2.pt` — item-NCF checkpoint (`format: item-ncf-v2`)
 - `meta/track_meta.parquet` — MPD metadata for all tracks
 - `mood_predictor/mood_predictor.pkl`
+- `policy.json` — validation-frozen shared serving policy
+- `acoustic_policy.json` — optional acoustic discovery-lane settings
 
 Missing artifacts degrade gracefully (fallback ranker, zeroed features) — check
 the "Engine capabilities" startup log line when debugging.

@@ -160,13 +160,19 @@ class SpotifyClient:
 
             return resp  # Give last response to caller to handle
 
-    async def search_tracks(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Search for tracks on Spotify with caching."""
+    async def search_tracks(self, query: str, limit: int = 10,
+                            market: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Search for tracks on Spotify with caching.
+
+        market pins the search to one region: smaller result space to rank
+        upstream and no cross-market duplicate entries. Leave it unset when
+        the caller needs the full international catalog.
+        """
         if self.demo_mode:
             return []
 
         # Create cache key
-        cache_key = (query.strip().lower(), limit)
+        cache_key = (query.strip().lower(), limit, market)
 
         # Check cache first
         cached_result = await self._cache_get(self._search_cache, cache_key)
@@ -174,8 +180,11 @@ class SpotifyClient:
             return cached_result
 
         try:
+            params: Dict[str, Any] = {"q": query, "type": "track", "limit": limit}
+            if market:
+                params["market"] = market
             resp = await self._request("GET", "https://api.spotify.com/v1/search",
-                                     params={"q": query, "type": "track", "limit": limit})
+                                     params=params)
             resp.raise_for_status()
             data = resp.json()
             tracks = [self._parse_spotify_track(t) for t in data.get("tracks", {}).get("items", [])]

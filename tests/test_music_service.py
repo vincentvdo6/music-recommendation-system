@@ -16,12 +16,17 @@ class RecordingEngine:
         self.calls: List[dict] = []
 
     def recommend(self, playlist_tracks, input_track_id=None, input_artist_name=None,
-                  input_track_name=None, limit=20):
+                  input_track_name=None, limit=20, serve_limit=None,
+                  profile="balanced", session_feedback=None, exclude_track_ids=None):
         self.calls.append({
             "playlist_tracks": list(playlist_tracks),
             "input_track_id": input_track_id,
             "input_artist_name": input_artist_name,
             "limit": limit,
+            "serve_limit": serve_limit,
+            "profile": profile,
+            "session_feedback": list(session_feedback or []),
+            "exclude_track_ids": list(exclude_track_ids or []),
         })
         return [
             {"id": tid, "name": tid, "artist": "", "duration_ms": 0,
@@ -79,7 +84,7 @@ async def test_different_seeds_reach_engine():
 
 
 async def test_recommendations_are_enriched_with_spotify_metadata():
-    service, _, _ = make_service(["r1", "r2"], playlist_catalog())
+    service, _, engine = make_service(["r1", "r2"], playlist_catalog())
     recs, source, info = await service.recommend_from_playlist(
         PLAYLIST, seed="spotify:track:p1", limit=2
     )
@@ -89,13 +94,53 @@ async def test_recommendations_are_enriched_with_spotify_metadata():
     assert recs[0]["album"] == "Rec One album"      # real Spotify metadata attached
     assert recs[0]["similarity_score"] == 0.9        # engine scores preserved
     assert info["tracks_in_model"] == 2
+    assert engine.calls[0]["limit"] == 50
+    assert info["engine_candidates"] == 2
+    assert info["playable_candidates"] == 2
+    assert info["engine_tracks_served"] == 2
+
+
+async def test_profile_and_session_signals_reach_the_ranker():
+    class SignalStore:
+        def recent_session_signals(self, session_id):
+            assert session_id == "session-12345678"
+            return [("r1", 1.0), ("r2", -0.6)]
+
+        def recent_session_exclusions(self, session_id):
+            assert session_id == "session-12345678"
+            return ["seen-1", "seen-2"]
+
+    service, _, engine = make_service(["r1", "r2"], playlist_catalog())
+    service.store = SignalStore()
+    await service.recommend_from_playlist(
+        PLAYLIST,
+        seed="spotify:track:p1",
+        limit=2,
+        session_id="session-12345678",
+        profile="explorer",
+    )
+
+    assert engine.calls[0]["serve_limit"] == 2
+    assert engine.calls[0]["profile"] == "explorer"
+    assert engine.calls[0]["session_feedback"] == [("r1", 1.0), ("r2", -0.6)]
+    assert engine.calls[0]["exclude_track_ids"] == ["seen-1", "seen-2"]
 
 
 async def test_artist_dedup_after_enrichment():
     # r1 and r3 share artist X; only the higher-ranked r1 survives.
     service, _, _ = make_service(["r1", "r3", "r2"], playlist_catalog())
-    recs, _, _ = await service.recommend_from_playlist(PLAYLIST, seed="spotify:track:p1", limit=3)
+    recs, _, _ = await service.recommend_from_playlist(
+        PLAYLIST, seed="spotify:track:p1", limit=3, profile="balanced"
+    )
     assert [r["id"] for r in recs] == ["r1", "r2"]
+
+
+async def test_closest_profile_keeps_two_highly_ranked_tracks_from_same_artist():
+    service, _, _ = make_service(["r1", "r3", "r2"], playlist_catalog())
+    recs, _, _ = await service.recommend_from_playlist(
+        PLAYLIST, seed="spotify:track:p1", limit=3, profile="familiar"
+    )
+    assert [r["id"] for r in recs] == ["r1", "r3", "r2"]
 
 
 async def test_blacklisted_content_is_filtered():
@@ -126,6 +171,31 @@ async def test_all_recs_unknown_to_spotify_still_returns_fallback():
     ]
     recs, _, _ = await service.recommend_from_playlist(PLAYLIST, seed="spotify:track:p1", limit=2)
     assert [r["id"] for r in recs] == ["r1"]
+
+
+async def test_popularity_fallback_does_not_repeat_recent_session_tracks():
+    class ExposureStore:
+        def recent_session_signals(self, session_id):
+            return []
+
+        def recent_session_exclusions(self, session_id):
+            return ["r1"]
+
+    service, _, engine = make_service([], playlist_catalog())
+    service.store = ExposureStore()
+    engine.popular_fallback = lambda limit: [
+        {"id": track_id, "name": track_id, "artist": "", "duration_ms": 0,
+         "rank_score": 0.5, "similarity_score": 0.0,
+         "recommendation": {"score": 0.5, "components": {}}, "why": ["popular"]}
+        for track_id in ("r1", "r2")
+    ]
+
+    recs, source, _ = await service.recommend_from_playlist(
+        PLAYLIST, seed="spotify:track:p1", limit=2, session_id="session-12345678"
+    )
+
+    assert source == "popular-fallback"
+    assert [rec["id"] for rec in recs] == ["r2"]
 
 
 async def test_name_only_playlist_search_does_not_include_none():
@@ -186,10 +256,14 @@ class ExtensionEngine(RecordingEngine):
     """Engine whose recs include an extension-catalog (dz:) track."""
 
     def recommend(self, playlist_tracks, input_track_id=None, input_artist_name=None,
-                  input_track_name=None, limit=20):
+                  input_track_name=None, limit=20, serve_limit=None,
+                  profile="balanced", session_feedback=None, exclude_track_ids=None):
         super().recommend(playlist_tracks, input_track_id=input_track_id,
                           input_artist_name=input_artist_name,
-                          input_track_name=input_track_name, limit=limit)
+                          input_track_name=input_track_name, limit=limit,
+                          serve_limit=serve_limit, profile=profile,
+                          session_feedback=session_feedback,
+                          exclude_track_ids=exclude_track_ids)
         base = {"rank_score": 1.0, "similarity_score": 0.5,
                 "recommendation": {"score": 1.0, "components": {}}, "why": ["test"]}
         return [
@@ -247,3 +321,32 @@ async def test_extension_duration_mismatch_rejected():
 
     recs, _, _ = await service.recommend_from_playlist([], seed="spotify:track:seed1", limit=5)
     assert not any(r["id"] == "sp_long" for r in recs)
+
+
+# ---------------------------------------------------------------- era spread
+
+
+def _dated_track(i, artist, release_date):
+    return {"id": f"t{i}", "name": f"Song {i}", "artist": artist, "release_date": release_date}
+
+
+def test_era_soft_cap_spreads_decades():
+    service, _, _ = make_service([])
+    pool = (
+        [_dated_track(i, f"A{i}", "2015-01-01") for i in range(20)]
+        + [_dated_track(20 + i, f"B{i}", "1985-06-01") for i in range(5)]
+        + [_dated_track(25 + i, f"C{i}", "1999-11-01") for i in range(5)]
+    )
+    picked = service._deduplicate_by_artist(pool, max_per_artist=1, limit=10)
+    assert len(picked) == 10
+    decades = [service._release_decade(t) for t in picked]
+    assert decades.count(2010) == 5  # seed's decade capped at half the list
+    assert 1980 in decades  # lower-ranked cross-era candidates surface
+
+
+def test_era_cap_is_soft_when_pool_is_one_decade():
+    service, _, _ = make_service([])
+    pool = [_dated_track(i, f"A{i}", "2015-01-01") for i in range(15)]
+    picked = service._deduplicate_by_artist(pool, max_per_artist=1, limit=10)
+    assert len(picked) == 10  # capped-out tracks refill rather than run short
+    assert [t["id"] for t in picked] == [f"t{i}" for i in range(10)]  # rank order kept

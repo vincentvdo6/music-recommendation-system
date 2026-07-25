@@ -29,7 +29,7 @@ session (~3 h total, stages checkpoint so a restarted session resumes).
 
 | artifact | purpose |
 |---|---|
-| `lightgbm_ranker_v2.txt` | LambdaRank ranker over the 17 serving features |
+| `lightgbm_ranker_v2.txt` | LambdaRank ranker over the 22 serving features |
 | `ncf_item_v2.pt` | item-NCF (fold-in NeuMF) — the `ncf_score` feature |
 | `track_meta.parquet` | real names/artists/durations/popularity for all tracks |
 | `metrics.json` | NDCG@10 / Recall@10/50 vs baselines + feature importances |
@@ -46,8 +46,11 @@ python scripts/evaluate.py          # offline A/B: v2 vs fallback vs seed-cosine
 python -m pytest -m slow            # asserts the model matches the serving contract
 ```
 
-The engine picks the new artifacts up on next start; if anything is missing or
-mismatched it degrades gracefully (see `services/recommendation/factory.py`).
+The installer validates the feature contract and requires a passing paired
+production release gate before writing any model file. Each accepted file is
+streamed into an atomic replacement. The engine picks the new artifacts up on
+next start; optional missing capabilities degrade gracefully (see
+`services/recommendation/factory.py`).
 
 ## Keeping features in sync
 
@@ -56,3 +59,17 @@ mismatched it degrades gracefully (see `services/recommendation/factory.py`).
 and the ranker loader refuses any model whose feature names don't match the
 serving contract. If you change a feature: edit `features.py`, re-copy it to
 `training/features_spec.py`, update the Kaggle dataset, retrain.
+
+## Learning from feedback
+
+The app stores anonymous impressions and feedback in local SQLite, including
+the full candidate slate needed to distinguish displayed, skipped, and unseen
+tracks. Export position-adjusted training rows with:
+
+```bash
+python scripts/export_feedback.py
+```
+
+The export uses inverse propensity weights for display position. Direction
+events such as "More similar" remain telemetry rather than positive or
+negative labels.

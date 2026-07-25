@@ -102,6 +102,50 @@ def test_similarity_score_is_seed_cosine(engine, vocab):
         assert abs(rec["similarity_score"] - expected) < 1e-5
 
 
+def test_session_affinity_tracks_recent_positive_and_negative_signals(engine, vocab):
+    candidates = np.stack([vocab["t00"], vocab["u00"]])
+
+    positive = engine._session_affinity(
+        ["t00", "u00"], candidates, [("t00", 1.0)]
+    )
+    negative = engine._session_affinity(
+        ["t00", "u00"], candidates, [("t00", -1.0)]
+    )
+
+    assert positive is not None and negative is not None
+    assert positive[0] > positive[1]
+    assert negative[0] < negative[1]
+    assert np.all((-1.0 <= positive) & (positive <= 1.0))
+
+    conflicted = engine._session_affinity(
+        ["t00", "u00"], candidates, [("t00", 1.0), ("t00", -0.9)]
+    )
+    assert conflicted is not None
+    assert abs(conflicted[0]) < 0.1  # weak net evidence must stay weak
+
+
+def test_recently_displayed_tracks_are_removed_before_ranking(engine):
+    baseline = engine.recommend([], input_track_id="t10", limit=8)
+    excluded = {rec["id"] for rec in baseline[:4]}
+    refreshed = engine.recommend(
+        [], input_track_id="t10", limit=8, exclude_track_ids=excluded
+    )
+
+    assert refreshed
+    assert excluded.isdisjoint(rec["id"] for rec in refreshed)
+
+
+def test_runtime_provenance_fingerprints_the_serving_contract(engine):
+    provenance = engine.runtime_provenance(mode="seed_only", profile="balanced")
+
+    assert len(provenance["ranker_sha256"]) == 64
+    assert len(provenance["serving_contract"]) == 16
+    assert len(provenance["profile_contract"]) == 16
+    assert provenance["profile"] == "balanced"
+    assert provenance["policy"]["seed_affinity"] == engine.policy.seed_affinity
+    assert provenance["acoustic"]["slots"] == 2
+
+
 def _mean_seed_cos(recs):
     return np.mean([r["similarity_score"] for r in recs])
 

@@ -33,6 +33,8 @@ models/
 evaluation/*
 !evaluation/calibration.json
 data/smpd/
+data/*.sqlite3
+data/*.sqlite3-*
 
 # Large binary formats — never commit
 *.zip

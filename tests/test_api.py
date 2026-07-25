@@ -10,10 +10,16 @@ from tests.conftest import spotify_track  # noqa: E402
 
 
 class FakeMusicService:
+    def __init__(self):
+        self.recommendation_calls = []
+
     async def search_tracks(self, query, *, limit=10):
         return [spotify_track("s1", f"Result for {query}", "Some Artist")], "spotify"
 
-    async def recommend_from_playlist(self, tracks_payload, *, seed=None, limit=5):
+    async def recommend_from_playlist(
+        self, tracks_payload, *, seed=None, limit=5, session_id=None, profile="familiar"
+    ):
+        self.recommendation_calls.append({"session_id": session_id, "profile": profile})
         recs = [
             {
                 **spotify_track("r1", "Rec One", "X"),
@@ -37,13 +43,16 @@ class FakeMusicService:
 @pytest.fixture
 async def client():
     previous_music = getattr(app.state, "music", None)
+    previous_feedback = getattr(app.state, "feedback_store", None)
     app.state.music = FakeMusicService()
+    app.state.feedback_store = None
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
     finally:
         app.state.music = previous_music
+        app.state.feedback_store = previous_feedback
 
 
 async def test_health(client):
@@ -81,9 +90,10 @@ async def test_search_failure_does_not_expose_internal_error(client):
 async def test_search_rate_limit_returns_429(client):
     transport = ASGITransport(app=app, client=("rate-limit-test", 1234))
     async with AsyncClient(transport=transport, base_url="http://test") as rate_client:
+        # /search allows 120/minute (autocomplete: one request per keystroke)
         responses = [
             await rate_client.get("/api/v1/search", params={"q": "ivy"})
-            for _ in range(31)
+            for _ in range(121)
         ]
 
     assert responses[-2].status_code == 200
@@ -96,6 +106,8 @@ async def test_playlist_recommendations(client):
         "tracks": [{"spotify_id": "p1", "name": "Song", "artist": "Artist"}],
         "seed": "spotify:track:p1",
         "limit": 5,
+        "session_id": "session-12345678",
+        "profile": "explorer",
     }
     resp = await client.post("/api/v1/playlist/recommendations", json=payload)
     assert resp.status_code == 200
@@ -105,6 +117,45 @@ async def test_playlist_recommendations(client):
     assert hit["similarity_score"] == 0.87
     assert hit["explanation"]["top_factors"] == ["often played alongside the seed track"]
     assert data["playlist"]["tracks_in_model"] == 1
+    assert data["impression_id"]
+    assert data["profile"] == "explorer"
+
+
+async def test_feedback_accepts_only_tracks_from_the_impression(client, tmp_path):
+    from services.storage import LocalStore
+
+    store = LocalStore(tmp_path / "feedback.sqlite3")
+    app.state.feedback_store = store
+    response = await client.post(
+        "/api/v1/playlist/recommendations",
+        json={"tracks": [], "seed": "spotify:track:p1", "limit": 5},
+    )
+    impression_id = response.json()["impression_id"]
+
+    accepted = await client.post(
+        "/api/v1/feedback",
+        json={
+            "impression_id": impression_id,
+            "track_id": "r1",
+            "event": "like",
+            "position": 0,
+        },
+    )
+    unknown = await client.post(
+        "/api/v1/feedback",
+        json={
+            "impression_id": impression_id,
+            "track_id": "not-shown",
+            "event": "like",
+            "position": 1,
+        },
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json() == {"accepted": True}
+    assert unknown.status_code == 404
+    store.close()
+    app.state.feedback_store = None
 
 
 async def test_playlist_import(client):

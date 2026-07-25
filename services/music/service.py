@@ -8,7 +8,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from services.apple.client import AppleMusicClient
 from services.recommendation.factory import get_engine
+from services.recommendation.profiles import get_profile
 from services.spotify.client import SpotifyClient
+from services.storage import LocalStore
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,12 @@ class MusicService:
         spotify: Optional[SpotifyClient] = None,
         apple: Optional[AppleMusicClient] = None,
         engine: Any = _UNSET,
+        store: Optional[LocalStore] = None,
     ) -> None:
         self.spotify = spotify
         self.apple = apple or AppleMusicClient()
         self.engine = get_engine() if engine is _UNSET else engine
+        self.store = store
         # dz:<id> -> Spotify track dict (or None): extension-catalog tracks
         # resolved lazily at serving time; negative results cached too.
         self._ext_resolutions: Dict[str, Optional[Dict[str, Any]]] = {}
@@ -74,9 +78,13 @@ class MusicService:
 
         if self.spotify and not self.spotify.demo_mode:
             try:
-                tracks = await self.spotify.search_tracks(query, limit=limit)
+                # US market keeps autocomplete free of cross-market duplicates.
+                tracks = await self.spotify.search_tracks(query, limit=limit, market="US")
                 source = "spotify"
-                tracks = await self._ensure_media_assets(tracks)
+                # No Apple enrichment here: search feeds the autocomplete,
+                # which only needs name/artist/artwork (all in the Spotify
+                # response). Previews are backfilled on the recommendations
+                # path, where tracks actually get played.
             except Exception as exc:  # pragma: no cover - defensive fallback
                 logger.warning("Spotify search failed (%s), falling back to Apple", exc)
                 tracks = []
@@ -93,6 +101,8 @@ class MusicService:
         *,
         seed: Optional[str] = None,
         limit: int = 5,
+        session_id: Optional[str] = None,
+        profile: str = "familiar",
     ) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
         """
         Generate recommendations driven by the searched song ("seed").
@@ -127,45 +137,112 @@ class MusicService:
             fetched = await self.spotify.get_tracks_bulk([input_track_id])
             input_metadata = fetched.get(input_track_id)
 
+        # Rank substantially deeper than the display limit.  Spotify
+        # availability loss and one-per-artist/era constraints should consume
+        # the next-best engine choices before a generic popularity fallback.
+        candidate_limit = min(200, max(50, limit * 10))
+        profile_config = get_profile(profile)
+        session_signals = (
+            self.store.recent_session_signals(session_id) if self.store is not None else []
+        )
+        session_exclusions = (
+            self.store.recent_session_exclusions(session_id)
+            if self.store is not None and hasattr(self.store, "recent_session_exclusions")
+            else []
+        )
         recommendations = self.engine.recommend(
             playlist_tracks=playlist_track_ids,
             input_track_id=input_track_id,
             input_artist_name=(input_metadata or {}).get("artist"),
             input_track_name=(input_metadata or {}).get("name"),
-            limit=limit * 3,  # headroom for enrichment losses + artist dedup
+            limit=candidate_limit,
+            serve_limit=limit,
+            profile=profile,
+            session_feedback=session_signals,
+            exclude_track_ids=session_exclusions,
         )
         source = "ml-playlist" if playlist_track_ids else "ml-seed"
+        engine_candidates = len(recommendations)
 
         if not recommendations:
             logger.warning("Engine returned no recommendations — using popularity fallback")
-            recommendations = self.engine.popular_fallback(limit * 3)
+            fallback_exclude = set(playlist_track_ids) | set(session_exclusions) | {input_track_id}
+            recommendations = [
+                track
+                for track in self.engine.popular_fallback(candidate_limit)
+                if track.get("id") not in fallback_exclude
+            ]
             source = "popular-fallback"
 
+        candidate_slate = [dict(track) for track in recommendations]
+
         recommendations = await self._enrich_with_spotify_metadata(recommendations)
-        recommendations = await self._ensure_media_assets(recommendations)
-        recommendations = self._deduplicate_by_artist(recommendations, max_per_artist=1, limit=limit)
+        playable_candidates = len(recommendations)
+        recommendations = self._deduplicate_by_artist(
+            recommendations,
+            max_per_artist=profile_config.max_per_artist,
+            limit=limit,
+            max_per_decade=None if profile_config.era_diversity else 0,
+        )
+        engine_served = len(recommendations) if source != "popular-fallback" else 0
+        fallback_tracks = len(recommendations) if source == "popular-fallback" else 0
 
         if len(recommendations) < limit:
             # Spotify drops and artist dedup can leave us short — refill from
             # the popularity fallback AFTER enrichment, not only before it.
             n_engine = len(recommendations)
-            exclude = {r["id"] for r in recommendations} | set(playlist_track_ids) | {input_track_id}
-            extras = [t for t in self.engine.popular_fallback(limit * 3) if t["id"] not in exclude]
+            exclude = (
+                {r["id"] for r in recommendations}
+                | set(playlist_track_ids)
+                | set(session_exclusions)
+                | {input_track_id}
+            )
+            extras = [t for t in self.engine.popular_fallback(candidate_limit) if t["id"] not in exclude]
             if extras:
                 extras = await self._enrich_with_spotify_metadata(extras)
-                extras = await self._ensure_media_assets(extras)
-                merged = self._deduplicate_by_artist(recommendations + extras, max_per_artist=1, limit=limit)
+                merged = self._deduplicate_by_artist(
+                    recommendations + extras,
+                    max_per_artist=profile_config.max_per_artist,
+                    limit=limit,
+                    max_per_decade=None if profile_config.era_diversity else 0,
+                )
                 if len(merged) > len(recommendations):
                     logger.info("Refilled %d slots from popularity fallback", len(merged) - len(recommendations))
+                    fallback_tracks += len(merged) - len(recommendations)
                     recommendations = merged
             if n_engine == 0 and recommendations:
                 source = "popular-fallback"  # nothing the engine picked survived
+
+        # Apple preview/artwork enrichment is network work; perform it only for
+        # the final served list, not every overfetched candidate.
+        recommendations = await self._ensure_media_assets(recommendations)
 
         playlist_info: Dict[str, Any] = {
             "playlist_size": len(tracks_map),
             "resolved_tracks": len(tracks_map),
         }
         playlist_info.update(self.engine.coverage(playlist_track_ids, input_track_id))
+        playlist_info.update({
+            "engine_candidates": engine_candidates,
+            "playable_candidates": playable_candidates,
+            "engine_tracks_served": engine_served,
+            "fallback_tracks_served": fallback_tracks,
+            "_candidate_slate": candidate_slate,
+            "_provenance": (
+                self.engine.runtime_provenance(
+                    mode="assisted" if playlist_track_ids else "seed_only",
+                    profile=profile,
+                    session_signal_count=len(session_signals),
+                    session_exclusion_count=len(session_exclusions),
+                )
+                if hasattr(self.engine, "runtime_provenance")
+                else {
+                    "profile": profile,
+                    "session_signal_count": len(session_signals),
+                    "session_exclusion_count": len(session_exclusions),
+                }
+            ),
+        })
 
         return recommendations, source, playlist_info
 
@@ -266,15 +343,32 @@ class MusicService:
 
         return tracks_map
 
+    @staticmethod
+    def _release_decade(track: Dict[str, Any]) -> Optional[int]:
+        try:
+            return int(str(track.get("release_date") or "")[:4]) // 10 * 10
+        except ValueError:
+            return None
+
     def _deduplicate_by_artist(
         self,
         tracks: List[Dict[str, Any]],
         max_per_artist: int = 1,
         limit: int = 20,
+        max_per_decade: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Artist diversity + content blacklist, applied after enrichment."""
+        """Artist + era diversity and content blacklist, applied after
+        enrichment. Co-listen neighbours are heavily era-clustered, so the
+        seed's decade would otherwise fill every slot; the decade cap is soft —
+        capped-out tracks refill the list rather than leave it short, and
+        tracks without a release date are exempt."""
+        if max_per_decade is None:
+            max_per_decade = max(2, (limit + 1) // 2)
+
         artist_counts: Dict[str, int] = {}
+        decade_counts: Dict[int, int] = {}
         diverse_tracks: List[Dict[str, Any]] = []
+        era_capped: List[Dict[str, Any]] = []
 
         for track in tracks:
             artist_lower = (track.get("artist") or "Unknown").casefold()
@@ -287,11 +381,32 @@ class MusicService:
             ):
                 continue
 
-            count = artist_counts.get(artist_lower, 0)
-            if count < max_per_artist:
-                diverse_tracks.append(track)
-                artist_counts[artist_lower] = count + 1
+            if artist_counts.get(artist_lower, 0) >= max_per_artist:
+                continue
 
+            decade = self._release_decade(track)
+            if (
+                max_per_decade > 0
+                and decade is not None
+                and decade_counts.get(decade, 0) >= max_per_decade
+            ):
+                era_capped.append(track)
+                continue
+
+            diverse_tracks.append(track)
+            artist_counts[artist_lower] = artist_counts.get(artist_lower, 0) + 1
+            if decade is not None:
+                decade_counts[decade] = decade_counts.get(decade, 0) + 1
+
+            if len(diverse_tracks) >= limit:
+                return diverse_tracks
+
+        for track in era_capped:
+            artist_lower = (track.get("artist") or "Unknown").casefold()
+            if artist_counts.get(artist_lower, 0) >= max_per_artist:
+                continue
+            diverse_tracks.append(track)
+            artist_counts[artist_lower] = artist_counts.get(artist_lower, 0) + 1
             if len(diverse_tracks) >= limit:
                 break
 
@@ -308,6 +423,14 @@ class MusicService:
         key = track["id"]
         if key in self._ext_resolutions:
             return self._ext_resolutions[key]
+        if self.store is not None:
+            try:
+                cached, resolved = self.store.get_extension_identity(key)
+                if cached:
+                    self._ext_resolutions[key] = resolved
+                    return resolved
+            except Exception as exc:
+                logger.warning("Extension identity cache read failed for %s: %s", key, exc)
         real = None
         name, artist = track.get("name") or "", track.get("artist") or ""
         if name and artist:
@@ -330,6 +453,11 @@ class MusicService:
                 real = cand
                 break
         self._ext_resolutions[key] = real
+        if self.store is not None:
+            try:
+                self.store.put_extension_identity(key, real)
+            except Exception as exc:
+                logger.warning("Extension identity cache write failed for %s: %s", key, exc)
         if real is None:
             logger.info("Extension track %s (%s — %s) has no Spotify identity", key, name, artist)
         return real
@@ -347,10 +475,18 @@ class MusicService:
         # would invalidate the whole chunk. They resolve by search instead.
         ids = [t["id"] for t in tracks if t.get("id") and not t["id"].startswith("dz:")]
         spotify_tracks = await self.spotify.get_tracks_bulk(ids)
-        for track in tracks:
-            if (track.get("id") or "").startswith("dz:"):
-                real = await self._resolve_extension_track(track)
-                if real:
+        extension_tracks = [
+            track for track in tracks if (track.get("id") or "").startswith("dz:")
+        ]
+        if extension_tracks:
+            resolved = await asyncio.gather(
+                *(self._resolve_extension_track(track) for track in extension_tracks),
+                return_exceptions=True,
+            )
+            for track, real in zip(extension_tracks, resolved):
+                if isinstance(real, Exception):
+                    logger.warning("Extension resolution failed for %s: %s", track.get("id"), real)
+                elif real:
                     spotify_tracks[track["id"]] = real
 
         enriched: List[Dict[str, Any]] = []
@@ -359,7 +495,8 @@ class MusicService:
             if not real:
                 continue
             merged = dict(real)
-            for key in ("recommendation", "rank_score", "similarity_score", "why"):
+            merged["catalog_id"] = track.get("catalog_id") or track.get("id")
+            for key in ("recommendation", "rank_score", "similarity_score", "why", "discovery"):
                 if key in track:
                     merged[key] = track[key]
             enriched.append(merged)

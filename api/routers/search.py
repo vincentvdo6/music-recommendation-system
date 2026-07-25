@@ -2,6 +2,7 @@
 
 import logging
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -9,6 +10,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from api.models import (
+    FeedbackRequest,
+    FeedbackResponse,
     PlaylistImportRequest,
     PlaylistImportResponse,
     PlaylistRecommendationsRequest,
@@ -20,6 +23,7 @@ from api.models import (
     SearchResponse,
     Track,
 )
+from services.recommendation.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["search"])
@@ -48,7 +52,7 @@ def _metadata_hints(track: Dict[str, Any]) -> List[str]:
 
 
 @router.get("/search", response_model=SearchResponse)
-@limiter.limit("30/minute")
+@limiter.limit("120/minute")  # autocomplete: every fresh keystroke is one request
 async def search_songs(
     request: Request,
     q: str = Query(..., min_length=2, max_length=200),
@@ -94,6 +98,7 @@ async def playlist_recommendations(
     request_id = getattr(request.state, "request_id", "unknown")
 
     music_service = request.app.state.music
+    effective_profile = get_profile(payload.profile).name
 
     try:
         playlist_tracks = [track.model_dump(exclude_none=True) for track in payload.tracks]
@@ -101,6 +106,8 @@ async def playlist_recommendations(
             playlist_tracks,
             seed=payload.seed,
             limit=payload.limit,
+            session_id=payload.session_id,
+            profile=effective_profile,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -124,6 +131,33 @@ async def playlist_recommendations(
         })
         hits.append(RecommendationHit(**payload_dict))
 
+    impression_id = str(uuid.uuid4())
+    candidate_slate = playlist_info.pop("_candidate_slate", recommendations_data)
+    provenance = playlist_info.pop("_provenance", {"profile": effective_profile})
+    provenance["requested_profile"] = payload.profile
+    feedback_store = getattr(request.app.state, "feedback_store", None)
+    if feedback_store is not None:
+        playlist_ids = [
+            track.get("spotify_id") or track.get("id")
+            for track in playlist_tracks
+        ]
+        try:
+            feedback_store.record_impression(
+                impression_id=impression_id,
+                request_id=request_id,
+                seed_id=payload.seed,
+                mode="assisted" if playlist_tracks else "seed_only",
+                playlist_ids=playlist_ids,
+                source=source,
+                recommendations=recommendations_data,
+                candidates=candidate_slate,
+                session_id=payload.session_id,
+                profile=effective_profile,
+                provenance=provenance,
+            )
+        except Exception:
+            logger.exception("Could not record recommendation impression %s", impression_id)
+
     return PlaylistRecommendationsResponse(
         seed=payload.seed,
         recommendations=hits,
@@ -133,7 +167,28 @@ async def playlist_recommendations(
         request_id=request_id,
         processing_time_ms=int((time.perf_counter() - start_time) * 1000),
         playlist=PlaylistSummary(**playlist_info),
+        impression_id=impression_id,
+        profile=effective_profile,
     )
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+@limiter.limit("120/minute")
+async def recommendation_feedback(
+    request: Request,
+    payload: FeedbackRequest,
+):
+    """Record privacy-minimal feedback for an item that was actually shown."""
+    feedback_store = getattr(request.app.state, "feedback_store", None)
+    if feedback_store is None:
+        raise HTTPException(status_code=503, detail="Feedback collection is unavailable")
+    try:
+        accepted = feedback_store.record_feedback(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not accepted:
+        raise HTTPException(status_code=404, detail="Unknown recommendation impression")
+    return FeedbackResponse(accepted=True)
 
 
 @router.post("/playlist/import", response_model=PlaylistImportResponse)

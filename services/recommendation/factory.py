@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from services.recommendation.acoustic import AcousticPolicy, load_acoustic_policy
 from services.recommendation.audio_store import AudioStore
 from services.recommendation.embeddings import EmbeddingService
 from services.recommendation.engine import RecommendationEngine
@@ -94,7 +95,7 @@ def create_engine(
             logger.warning("Failed to load audio embeddings: %s", exc)
 
     # Extension catalog (harvested beyond the MPD vocabulary) — both halves
-    # optional; the audio-ANN retrieval channel reaches whatever loads.
+    # optional; exact acoustic retrieval reaches whatever loads.
     n_extension = 0
     if track_meta.available and Path(EXTENSION_TRACKS_PATH).exists():
         try:
@@ -110,9 +111,18 @@ def create_engine(
             logger.warning("Failed to load extension audio embeddings: %s", exc)
 
     # Frozen validation policy from the installed artifact, env vars override.
-    from services.recommendation.policy import load_policy
+    from services.recommendation.policy import ScoringPolicy, load_policy
 
-    policy = load_policy()
+    try:
+        policy = load_policy()
+    except Exception as exc:
+        logger.warning("Serving policy unavailable (%s) — using safe defaults", exc)
+        policy = ScoringPolicy()
+    try:
+        acoustic_policy = load_acoustic_policy()
+    except Exception as exc:
+        logger.warning("Acoustic policy unavailable (%s) — using safe defaults", exc)
+        acoustic_policy = AcousticPolicy()
     seed_affinity, discovery = policy.seed_affinity, policy.discovery
 
     engine = RecommendationEngine(
@@ -124,6 +134,7 @@ def create_engine(
         audio=audio,
         seed_affinity=seed_affinity,
         discovery=discovery,
+        acoustic_policy=acoustic_policy,
     )
     engine.policy = policy  # includes the frozen floor as well
 

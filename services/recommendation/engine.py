@@ -1,33 +1,37 @@
 """
 Recommendation engine: the one and only serving pipeline.
 
-    ANN retrieval (85% seed / 15% playlist)
-      -> artist pre-dedup (retrieval order, real artists)
-      -> mood filter (keep top 55% by similarity to the blended target mood)
+    item2vec ANN retrieval (70% seed / 30% playlist mean)
+      + exact acoustic retrieval (when the seed has an audio embedding)
+      -> optional artist/mood pre-filters (disabled by the shipped contract)
       -> vectorized feature matrix (features.FEATURE_NAMES)
-      -> ranker (LightGBM LambdaRank, or linear fallback)
-      -> top-N with per-track explanations
+      -> LightGBM LambdaRank (or linear fallback)
+      -> acoustic discovery reservation + top-N explanations
 
-The searched song ("seed") dominates: 70% of the candidate pool comes from
-its neighbors, its mood carries 80% of the target-mood blend, and
-seed_i2v_cos is the primary ranking feature. Display metadata (album art,
+The searched song ("seed") dominates the collaborative pool: 70% comes from
+its neighbors, while the playlist mean supplies 30%.
+Display metadata (album art,
 preview URLs, live popularity) is attached later by the service layer via
 the Spotify metadata API — the engine itself never performs I/O.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from services.recommendation import features as F
+from services.recommendation.acoustic import AcousticPolicy
 from services.recommendation.audio_store import AudioStore
 from services.recommendation.embeddings import EmbeddingService
 from services.recommendation.mood import MoodPredictor
 from services.recommendation.ncf import ItemNCFScorer
+from services.recommendation.profiles import DEFAULT_PROFILE, PROFILE_CONTRACT, get_profile
 from services.recommendation.track_meta import TrackMetaStore
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,12 @@ RETRIEVAL_POOL = 1000
 K_AUDIO = 4000
 SEED_SHARE = 0.70         # fraction of the pool retrieved from the seed's neighbors
 SEED_MOOD_WEIGHT = 0.8    # seed weight in the target-mood blend
+# Discovery reservation: the ranker is trained only on in-vocab (MPD) positives,
+# so it drives every extension-catalog track — the cross-era sound-alikes that
+# ARE the reason the audio catalog exists — below the fold (measured: 0 in the
+# top 200 even when they are the seed's nearest acoustic neighbours). These
+# slots guarantee a few of the closest on-vibe extension tracks survive to the
+# served list. Tunable via the acoustic policy artifact/environment.
 # Hard filters are deliberately soft: mood features earn ~2% of model gain,
 # so a mood veto mostly destroyed candidate recall (funnel measurements);
 # the ranker's mood_sim feature handles coherence. Artist pre-caps destroyed
@@ -102,6 +112,7 @@ class RecommendationEngine:
         audio: Optional[AudioStore] = None,
         seed_affinity: float = DEFAULT_SEED_AFFINITY,
         discovery: float = DEFAULT_DISCOVERY,
+        acoustic_policy: Optional[AcousticPolicy] = None,
     ):
         if embeddings is None or embeddings.item2vec.wv is None:
             raise ValueError("RecommendationEngine requires a loaded EmbeddingService")
@@ -114,6 +125,7 @@ class RecommendationEngine:
         self.seed_affinity = seed_affinity
         self.discovery = discovery
         self.policy = ScoringPolicy(seed_affinity=seed_affinity, discovery=discovery)
+        self.acoustic_policy = acoustic_policy or AcousticPolicy()
 
     # ------------------------------------------------------------------ API
 
@@ -124,6 +136,10 @@ class RecommendationEngine:
         input_artist_name: Optional[str] = None,
         input_track_name: Optional[str] = None,
         limit: int = 20,
+        serve_limit: Optional[int] = None,
+        profile: str = DEFAULT_PROFILE,
+        session_feedback: Optional[Sequence[Tuple[str, float]]] = None,
+        exclude_track_ids: Optional[Collection[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Recommend tracks driven by the searched song; the playlist (optional) adds flavor."""
         seed_id, seed_proxied = self._resolve_seed(input_track_id, input_artist_name)
@@ -139,11 +155,19 @@ class RecommendationEngine:
         # features ("fits the playlist" partly restating "is the seed");
         # playlist context is everything EXCEPT the seed.
         playlist_tracks = [t for t in playlist_tracks if t not in (input_track_id, seed_id)]
+        ranker = self.ranker
+        profile_config = get_profile(profile)
+        policy = profile_config.scoring_policy(self.policy)
+        acoustic_policy = profile_config.acoustic_policy(self.acoustic_policy)
+        visible_limit = max(1, min(int(serve_limit or limit), int(limit)))
 
         seed_audio_vec = self._seed_audio(seed_id, input_artist_name, input_track_id)
         ids, ctx = self._retrieve(playlist_tracks, seed_id, input_track_id, seed_audio_vec)
+        excluded = {str(track_id) for track_id in (exclude_track_ids or ()) if track_id}
+        if excluded:
+            ids = [track_id for track_id in ids if track_id not in excluded]
         if not ids:
-            logger.warning("No candidates retrieved (playlist outside model vocabulary)")
+            logger.warning("No candidates remain after retrieval and session exclusions")
             return []
 
         vectors = self._vectors(ids)
@@ -177,9 +201,23 @@ class RecommendationEngine:
         seed_cos = F.effective_seed_cos(X)
         has_seed = ctx.seed_vec is not None or ctx.seed_audio_vec is not None
 
-        scores = self.policy.blend(self.ranker.predict(X), seed_cos, X["log_pop"].to_numpy(), has_seed)
-        order = self.policy.select(scores, seed_cos, limit, has_seed)
-        explanations = self.ranker.explain(X.iloc[order])
+        scores = policy.blend(ranker.predict(X), seed_cos, X["log_pop"].to_numpy(), has_seed)
+        session_affinity = self._session_affinity(ids, vectors, session_feedback or ())
+        if session_affinity is not None:
+            scores = scores + profile_config.session_weight * session_affinity
+
+        # Keep a deep tail for availability/dedup fallbacks, but reserve
+        # discovery against the list the person will actually see.
+        order = policy.select(scores, seed_cos, len(ids), has_seed)
+        visible_order, discovery_ids = self._reserve_discovery(
+            order, ids, X, scores, visible_limit, has_seed, policy, acoustic_policy
+        )
+        visible_set = set(int(i) for i in visible_order)
+        order = np.concatenate([
+            visible_order,
+            np.asarray([i for i in order if int(i) not in visible_set], dtype=np.int64),
+        ])[:limit]
+        explanations = ranker.explain(X.iloc[order])
 
         meta = self.track_meta.lookup([ids[i] for i in order]) if self.track_meta else None
         results = []
@@ -208,16 +246,164 @@ class RecommendationEngine:
                         "playlist_similarity": float(row["playlist_i2v_cos"]),
                         "mood_match": float(row["mood_sim"]),
                         "popularity_prior": float(row["log_pop"]),
+                        "audio_similarity": float(row["audio_cos_seed"]),
+                        "audio_retrieval_rr": float(row["audio_seed_rr"]),
+                        "has_i2v": float(row["has_i2v"]),
+                        "session_affinity": float(session_affinity[i]) if session_affinity is not None else 0.0,
                     },
                 },
-                "why": [FEATURE_LABELS.get(feat, feat) for feat, _ in explanations[out_pos]],
+                "why": (["sounds like your seed (different era)"] if tid in discovery_ids
+                        else [FEATURE_LABELS.get(feat, feat) for feat, _ in explanations[out_pos]]),
+                "discovery": tid in discovery_ids,
             })
 
         logger.info(
             "Recommended %d/%d candidates (ranker=%s, seed=%s%s)",
-            len(results), len(ids), self.ranker.name, seed_id, " via proxy" if seed_proxied else "",
+            len(results), len(ids), ranker.name, seed_id, " via proxy" if seed_proxied else "",
         )
         return results
+
+    def runtime_provenance(
+        self,
+        *,
+        mode: str,
+        profile: str = DEFAULT_PROFILE,
+        session_signal_count: int = 0,
+        session_exclusion_count: int = 0,
+    ) -> Dict[str, Any]:
+        """Serializable serving contract captured with every impression."""
+        profile_config = get_profile(profile)
+        ranker = self.ranker
+        policy = profile_config.scoring_policy(self.policy)
+        acoustic = profile_config.acoustic_policy(self.acoustic_policy)
+        ranker_name = getattr(ranker, "name", type(ranker).__name__)
+        ranker_sha256 = getattr(ranker, "artifact_sha256", "unknown")
+        contract_payload = {
+            "mode": mode,
+            "ranker": ranker_name,
+            "ranker_sha256": ranker_sha256,
+            "profile_contract": PROFILE_CONTRACT,
+        }
+        serving_contract = hashlib.sha256(
+            json.dumps(contract_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+        return {
+            "ranker": ranker_name,
+            "ranker_sha256": ranker_sha256,
+            "serving_contract": serving_contract,
+            "profile_contract": PROFILE_CONTRACT,
+            "profile": profile_config.name,
+            "policy": {
+                "seed_affinity": policy.seed_affinity,
+                "discovery": policy.discovery,
+                "floor": policy.floor,
+                "scale": policy.scale,
+                "fixed_std": policy.fixed_std,
+            },
+            "acoustic": {
+                "slots": acoustic.slots,
+                "min_cos": acoustic.min_cos,
+                "reciprocal_rank_weight": acoustic.reciprocal_rank_weight,
+                "extension_only": acoustic.extension_only,
+            },
+            "session_signal_count": int(session_signal_count),
+            "session_exclusion_count": int(session_exclusion_count),
+        }
+
+    def _reserve_discovery(
+        self,
+        order: np.ndarray,
+        ids: List[str],
+        X: "Any",
+        scores: np.ndarray,
+        limit: int,
+        has_seed: bool,
+        policy: Optional[ScoringPolicy] = None,
+        acoustic_policy: Optional[AcousticPolicy] = None,
+    ) -> Tuple[np.ndarray, set]:
+        """Guarantee a few cross-era sound-alikes survive the ranker.
+
+        Extension-catalog tracks (has_i2v == 0) are never in-vocab training
+        positives, so the ranker demotes them wholesale. This pulls the closest
+        on-vibe extension tracks (by acoustic cosine to the seed) into reserved
+        slots and interleaves them so they are visible without dominating.
+        Returns the reordered index array and the set of injected track ids.
+        """
+        acoustic = acoustic_policy or self.acoustic_policy
+        policy = policy or self.policy
+        if not has_seed or acoustic.slots <= 0 or self.audio is None:
+            return order, set()
+        has_i2v = X["has_i2v"].to_numpy()
+        audio_cos = X["audio_cos_seed"].to_numpy()
+        audio_rr = (X["audio_seed_rr"].to_numpy()
+                    if "audio_seed_rr" in X.columns else np.zeros(len(X), dtype=np.float32))
+        picked = list(order[:limit])
+
+        def eligible_lane(i):
+            return has_i2v[i] == 0 if acoustic.extension_only else audio_rr[i] > 0
+
+        k = min(acoustic.slots, limit // 2)  # never let discovery take the list over
+        floor = max(getattr(policy, "floor", 0.0), acoustic.min_cos)
+        lane = [i for i in range(len(has_i2v)) if eligible_lane(i) and audio_cos[i] >= floor]
+        if not lane:
+            return order, set()
+        lane.sort(key=lambda i: -(audio_cos[i] + acoustic.reciprocal_rank_weight * audio_rr[i]))
+        target = lane[:k]
+        picked_set = set(picked)
+        inject = [i for i in target if i not in picked_set]
+        discovery_ids = {ids[i] for i in target if i in picked_set}
+        if not inject:
+            return order, discovery_ids
+
+        # Free the lowest-scored non-target picks to make room, keep the rest by score.
+        droppable = sorted((i for i in picked if i not in target), key=lambda i: scores[i])
+        drop = set(droppable[:len(inject)])
+        main = sorted((i for i in picked if i not in drop), key=lambda i: -scores[i])
+
+        # Interleave discovery tracks at even intervals for visibility.
+        final: List[int] = []
+        gap = max(1, len(main) // len(inject))
+        di = 0
+        for pos, i in enumerate(main):
+            final.append(i)
+            if di < len(inject) and (pos + 1) % gap == 0:
+                final.append(inject[di])
+                di += 1
+        final.extend(inject[di:])
+        final = final[:limit]
+        discovery_ids.update(ids[i] for i in inject if i in final)
+        return np.array(final, dtype=int), discovery_ids
+
+    def _session_affinity(
+        self,
+        ids: List[str],
+        candidate_vectors: np.ndarray,
+        feedback: Sequence[Tuple[str, float]],
+    ) -> Optional[np.ndarray]:
+        """Confidence-preserving weighted cosine to recent session feedback."""
+        weighted = []
+        weights = []
+        for track_id, weight in feedback:
+            vector = self.embeddings.item2vec.vector(track_id)
+            if vector is None or not np.isfinite(weight) or not weight:
+                continue
+            vector = np.asarray(vector, dtype=np.float32)
+            vector_norm = float(np.linalg.norm(vector))
+            if not vector_norm:
+                continue
+            weighted.append((vector / vector_norm) * float(weight))
+            weights.append(abs(float(weight)))
+        if not weighted or not sum(weights):
+            return None
+        taste = np.sum(weighted, axis=0) / sum(weights)
+        norm = float(np.linalg.norm(taste))
+        if not norm:
+            return None
+        candidate_norms = np.linalg.norm(candidate_vectors, axis=1)
+        safe = np.where(candidate_norms > 0, candidate_norms, 1.0)
+        affinity = (candidate_vectors @ taste) / safe
+        affinity[candidate_norms == 0] = 0.0
+        return np.clip(affinity, -1.0, 1.0).astype(np.float32)
 
     def coverage(self, playlist_tracks: List[str], input_track_id: Optional[str] = None) -> Dict[str, Any]:
         """How much of the request the model can actually see."""
@@ -307,12 +493,16 @@ class RecommendationEngine:
                 )
             ctx.seed_vec = self.embeddings.item2vec.vector(seed_id)
         elif playlist_tracks:
-            playlist_neighbors = self.embeddings.get_playlist_neighbors(playlist_tracks, k=RETRIEVAL_POOL)
+            playlist_neighbors = self.embeddings.get_playlist_neighbors(
+                playlist_tracks, k=RETRIEVAL_POOL
+            )
+
+        exclude = set(playlist_tracks) | {seed_id, input_track_id, None}
 
         # Second retrieval channel: what SOUNDS like the seed, age-blind.
         # Reaches tracks with no co-occurrence vector at all (extension catalog).
         if self.audio and seed_audio_vec is not None:
-            audio_neighbors = self.audio.nearest(seed_audio_vec, k=K_AUDIO)
+            audio_neighbors = self.audio.nearest(seed_audio_vec, k=K_AUDIO, exclude=exclude)
         ctx.seed_audio_vec = seed_audio_vec
         ctx.audio_rank = {tid: rank for rank, tid in enumerate(audio_neighbors)}
 
@@ -327,7 +517,6 @@ class RecommendationEngine:
         ]
         ctx.playlist_vecs = np.stack(playlist_vecs) if playlist_vecs else None
 
-        exclude = set(playlist_tracks) | {seed_id, input_track_id, None}
         seen = set()
         ids = []
         for tid in [*seed_neighbors, *playlist_neighbors, *audio_neighbors]:

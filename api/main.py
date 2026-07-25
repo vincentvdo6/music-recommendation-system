@@ -20,6 +20,7 @@ from api.models import HealthResponse
 from api.routers import search
 from services.music.service import MusicService
 from services.spotify.client import SpotifyClient
+from services.storage import LocalStore
 
 # Load .env before reading any configuration values in this module.
 load_dotenv()
@@ -73,10 +74,20 @@ async def lifespan(app: FastAPI):
 
     # Initialize Spotify client
     spotify_client = SpotifyClient()
-    music_service = MusicService(spotify=spotify_client)
+    store_path = os.getenv("ONEREC_STORE_PATH", "data/one_rec.sqlite3").strip()
+    feedback_store = None
+    if store_path:
+        try:
+            feedback_store = LocalStore(store_path)
+        except Exception as exc:
+            # Feedback is useful but must never make recommendation serving
+            # unavailable (read-only filesystems are common in deployments).
+            logger.warning("Local feedback store unavailable (%s) — continuing without it", exc)
+    music_service = MusicService(spotify=spotify_client, store=feedback_store)
     await music_service.start()
 
     app.state.music = music_service
+    app.state.feedback_store = feedback_store
     logger.info("Spotify demo_mode=%s", spotify_client.demo_mode)
 
     try:
@@ -85,6 +96,8 @@ async def lifespan(app: FastAPI):
         # Clean shutdown
         logger.info("Shutting down Music Recommendation API")
         await app.state.music.close()
+        if app.state.feedback_store is not None:
+            app.state.feedback_store.close()
 
 
 # Use the same limiter instance that owns the route decorators.

@@ -26,7 +26,9 @@ ARTIFACTS = {
     "ncf_item_v2.pt": "models/ncf",
     "track_meta.parquet": "models/meta",
     "audio_emb.parquet": "models/audio",
-    "policy.json": "models",  # validation-frozen serving policy (dials + scale)
+    "policy.json": "models",
+    "metrics.json": "models",
+    "feature_names.json": "models",
 }
 
 
@@ -37,8 +39,13 @@ def download(url: str, dest: Path) -> None:
             sys.stdout.write(f"\r  {dest.name}: {done / 1e6:,.0f} / {total / 1e6:,.0f} MB")
             sys.stdout.flush()
 
-    urllib.request.urlretrieve(url, dest, reporthook=report)
-    print()
+    partial = dest.with_name(dest.name + ".part")
+    try:
+        urllib.request.urlretrieve(url, partial, reporthook=report)
+        partial.replace(dest)
+        print()
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def main() -> int:

@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>One-Rec — one great recommendation at a time</title>
-  <meta name="description" content="Paste a playlist, search a song, get one perfect recommendation — ranked by a model trained on a million playlists.">
+  <title>One-Rec — music recommendation engine</title>
+  <meta name="description" content="Import a playlist, search a song, get ranked recommendations — item2vec retrieval and a learned ranker trained on one million playlists.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2317150f'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23f6f3ec'/%3E%3Ccircle cx='16' cy='16' r='1.6' fill='%2317150f'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
@@ -13,44 +13,67 @@
 <body>
   <div class="page">
 
-    <header class="masthead">
-      <div class="wordmark">One<em>-</em>Rec</div>
-      <div class="tagline">One great recommendation at a time</div>
-    </header>
+    <!-- View 0: the cover — import a playlist to begin -->
+    <section class="cover" id="importView">
+      <div class="cover-main">
+        <header>
+          <h1 class="wordmark cover-wordmark">One<em>-</em>Rec</h1>
+          <p class="tagline">Music recommendation engine</p>
+        </header>
 
-    <section class="step" id="importStep">
-      <div class="step-head">
-        <span class="step-no">01</span>
-        <h2 class="step-title">Your library — optional</h2>
-      </div>
-      <div class="field-row">
-        <input id="playlistUrlInput" class="field" type="url" autocomplete="off" spellcheck="false"
-          aria-label="Public Spotify playlist URL"
-          placeholder="Paste a public Spotify playlist link to flavor results with your taste">
-        <button id="playlistImportBtn" class="btn" type="button">Import</button>
-      </div>
-      <p id="playlistStatus" class="status-line">No playlist — searches run in pure seed mode.</p>
-    </section>
-
-    <section class="step" id="seedStep">
-      <div class="step-head">
-        <span class="step-no">02</span>
-        <h2 class="step-title">The seed</h2>
-      </div>
-      <form id="searchForm" class="field-row">
-        <div class="search-wrap">
-          <input id="songInput" class="field" type="text" autocomplete="off" spellcheck="false"
-            aria-label="Seed song"
-            placeholder="Search the song you can't stop playing">
-          <div id="suggestions" class="suggestions hidden" role="listbox"></div>
+        <div class="field-row hero-row">
+          <input id="playlistUrlInput" class="field" type="url" autocomplete="off" spellcheck="false"
+            aria-label="Public Spotify playlist URL"
+            placeholder="Public Spotify playlist link">
+          <button id="playlistImportBtn" class="btn" type="button">Import</button>
         </div>
-        <button id="searchBtn" class="btn" type="submit">Recommend</button>
-      </form>
-      <div id="errorBanner" class="error-banner hidden" role="alert"></div>
+        <p id="playlistStatus" class="status-line"></p>
+      </div>
+
+      <footer class="colophon">
+        <span>Item2vec retrieval · learned ranking · trained on one million playlists</span>
+        <span><a href="https://github.com/vincentvdo6/music-recommendation-system" target="_blank" rel="noopener">Source ↗</a></span>
+      </footer>
     </section>
 
-    <section class="sleeve-section hidden" id="resultSection">
-      <p class="seed-line">Because you played <strong id="seedSummary"></strong></p>
+    <!-- View 1: the seed — search the song to recommend from -->
+    <section class="seed hidden" id="seedView">
+      <header class="page-head">
+        <span class="wordmark">One<em>-</em>Rec</span>
+        <button id="seedBackBtn" class="text-link" type="button">← Playlist</button>
+      </header>
+
+      <div class="seed-main">
+        <p class="seed-kicker" id="seedKicker">—</p>
+        <form id="searchForm" class="field-row hero-row">
+          <div class="search-wrap">
+            <input id="songInput" class="field" type="text" autocomplete="off" spellcheck="false"
+              aria-label="Seed song"
+              placeholder="Search a song">
+            <div id="suggestions" class="suggestions hidden" role="listbox"></div>
+          </div>
+          <button id="searchBtn" class="btn" type="submit">Recommend</button>
+        </form>
+        <label class="profile-control" for="preferenceProfile">
+          <span>Recommendation style</span>
+          <select id="preferenceProfile" aria-label="Recommendation style">
+            <option value="familiar" selected>Closest match</option>
+            <option value="balanced">Balanced</option>
+            <option value="explorer">Explorer</option>
+          </select>
+        </label>
+        <div id="errorBanner" class="error-banner hidden" role="alert"></div>
+      </div>
+    </section>
+
+    <!-- View 2: the record sleeve -->
+    <section class="result hidden" id="resultView">
+      <header class="page-head">
+        <span class="wordmark">One<em>-</em>Rec</span>
+        <button id="backBtn" class="text-link" type="button">← New search</button>
+      </header>
+
+      <p class="seed-line">Seed — <strong id="seedSummary"></strong></p>
 
       <article class="sleeve" id="sleeve">
         <div class="sleeve-art-wrap">
@@ -59,7 +82,7 @@
 
         <div class="sleeve-body">
           <p class="rec-index" id="recIndex">01 / 10</p>
-          <h1 class="rec-title" id="recTitle"></h1>
+          <h2 class="rec-title" id="recTitle"></h2>
           <p class="rec-artist" id="recArtist"></p>
 
           <hr class="rule">
@@ -76,6 +99,16 @@
             <span class="match-value" id="matchValue">—</span>
           </div>
           <p class="why-line" id="whyLine"></p>
+
+          <div class="feedback-row" aria-label="Recommendation feedback">
+            <span class="feedback-label">Does this fit?</span>
+            <button id="likeBtn" class="feedback-btn" type="button" aria-pressed="false">Yes</button>
+            <button id="neutralBtn" class="feedback-btn" type="button" aria-pressed="false">Neutral</button>
+            <button id="dislikeBtn" class="feedback-btn" type="button" aria-pressed="false">Not for me</button>
+            <button id="moreLikeBtn" class="feedback-btn" type="button" aria-pressed="false">More like this</button>
+            <button id="moreSimilarBtn" class="feedback-btn" type="button" aria-pressed="false">More similar</button>
+            <span id="feedbackStatus" class="feedback-status" aria-live="polite"></span>
+          </div>
 
           <hr class="rule faint">
 
@@ -102,12 +135,9 @@
       </article>
     </section>
 
-    <footer class="colophon">
-      <span>Item2vec retrieval · learned ranking · trained on one million playlists</span>
-      <span><a href="https://github.com/vincentvdo6/music-recommendation-system" target="_blank" rel="noopener">Source ↗</a></span>
-    </footer>
-
   </div>
+
+  <div class="rail hidden" id="deckRail" aria-hidden="true"><span class="rail-thumb"></span></div>
 
   <script type="module" src="/static/js/app.js"></script>
 </body>

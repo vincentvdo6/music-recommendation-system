@@ -10,6 +10,8 @@ model is absent or rejected.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -41,9 +43,11 @@ class LightGBMRanker:
     def __init__(self, model_path: str):
         import lightgbm as lgb
 
-        if not Path(model_path).exists():
+        path = Path(model_path)
+        if not path.exists():
             raise FileNotFoundError(model_path)
 
+        self.artifact_sha256 = _file_sha256(path)
         self.model = lgb.Booster(model_file=model_path)
         model_features = self.model.feature_name()
         if model_features != FEATURE_NAMES:
@@ -90,6 +94,8 @@ class LinearFallbackRanker:
         if unknown:
             raise ValueError(f"Fallback weights reference unknown features: {unknown}")
         self._weight_vec = np.array([self.weights.get(name, 0.0) for name in FEATURE_NAMES], dtype=np.float64)
+        encoded = json.dumps(self.weights, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        self.artifact_sha256 = hashlib.sha256(encoded).hexdigest()
 
     def predict(self, features: pd.DataFrame) -> np.ndarray:
         return features[FEATURE_NAMES].to_numpy(dtype=np.float64) @ self._weight_vec
@@ -97,3 +103,11 @@ class LinearFallbackRanker:
     def explain(self, features: pd.DataFrame, top_k: int = 3) -> List[List[Tuple[str, float]]]:
         contribs = features[FEATURE_NAMES].to_numpy(dtype=np.float64) * self._weight_vec
         return [_top_positive(row, top_k) for row in contribs]
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

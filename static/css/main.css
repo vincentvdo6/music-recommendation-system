@@ -1,5 +1,7 @@
 /* One-Rec — editorial record-sleeve design system.
-   Paper & ink, one dynamic accent extracted from the album artwork. */
+   Paper & ink, one dynamic accent extracted from the album artwork.
+   Two views in one document: the cover (seed search) tweens into the
+   result sleeve via the View Transitions API. */
 
 @font-face {
   font-family: "Fraunces";
@@ -47,6 +49,8 @@
 
 html {
   scroll-behavior: smooth;
+  /* keep layout width stable when the result view's scrollbar appears */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -65,19 +69,19 @@ body {
 .page {
   max-width: 1060px;
   margin: 0 auto;
-  padding: 0 clamp(1.25rem, 4vw, 3rem) 6rem;
+  padding: 0 clamp(1.25rem, 4vw, 3rem);
+  /* both views share one grid cell so they can overlap while a scroll
+     gesture scrubs between them (scrub.js) */
+  display: grid;
 }
 
-/* ---------------------------------------------------------------- header */
-
-.masthead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 2.2rem 0 1.1rem;
-  border-bottom: 1px solid var(--ink);
+.cover,
+.seed,
+.result {
+  grid-area: 1 / 1;
 }
+
+/* ---------------------------------------------------------------- wordmark */
 
 .wordmark {
   font-family: var(--serif);
@@ -97,37 +101,77 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
-  white-space: nowrap;
 }
 
-/* --------------------------------------------------------------- sections */
+/* ------------------------------------------------------------ cover (view 1) */
 
-.step {
-  padding: 2.6rem 0 2.2rem;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.step-head {
+.cover {
+  min-height: 100svh;
   display: flex;
-  align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 1.4rem;
+  flex-direction: column;
 }
 
-.step-no {
-  font-family: var(--serif);
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--accent);
-  transition: color 400ms ease;
+.cover-main {
+  margin: auto;
+  width: 100%;
+  max-width: 620px;
+  padding: 4rem 0;
 }
 
-.step-title {
-  font-size: 0.8rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
+.cover-wordmark {
+  font-size: clamp(3.2rem, 10vw, 5.4rem);
+  line-height: 1;
+  /* permanent layer: promoting it at scrub start causes a first-frame
+     rasterization hitch right as the morph begins */
+  will-change: transform;
 }
+
+.cover .tagline {
+  margin-top: 0.8rem;
+}
+
+.hero-row {
+  margin-top: 3rem;
+}
+
+.hero-row .field {
+  font-size: 1.25rem;
+  padding: 0.7rem 0.1rem;
+}
+
+/* Deck position rail — the article-style scroll indicator on the right.
+   --deck (0..2, set by scrub.js / app.js) is the current page plus scrub
+   progress; the thumb is one page tall and slides along the track. */
+
+.rail {
+  position: fixed;
+  right: clamp(0.9rem, 2vw, 1.6rem);
+  top: 50%;
+  transform: translateY(-50%);
+  height: min(34svh, 240px);
+  width: 2px;
+  background: var(--hairline);
+  pointer-events: none;
+  z-index: 40;
+}
+
+/* The thumb spans one page out of the pages unlocked so far: halves once
+   the playlist is in (--deck-count defaults to 2), thirds once the result
+   page has been seen. translateY(100%) steps are relative to the thumb's
+   own height, so position stays correct when the count changes. */
+.rail-thumb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: calc(100% / var(--deck-count, 2));
+  background: var(--accent);
+  transform: translateY(calc(var(--deck, 0) * 100%));
+  transition: transform 480ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    height 480ms cubic-bezier(0.2, 0.7, 0.2, 1), background 400ms ease;
+}
+
+/* --------------------------------------------------------- fields & buttons */
 
 .field-row {
   display: flex;
@@ -192,7 +236,10 @@ body {
   margin-top: 0.9rem;
   font-size: 0.9rem;
   color: var(--muted);
-  min-height: 1.4em;
+}
+
+.status-line:empty {
+  display: none;
 }
 
 .status-line.positive {
@@ -274,23 +321,62 @@ body {
   color: var(--muted);
 }
 
-/* ---------------------------------------------------------------- sleeve */
+/* -------------------------------------------- inner pages (seed + result) */
 
-.sleeve-section {
-  padding-top: 3rem;
+.page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.6rem 0 1rem;
+  border-bottom: 1px solid var(--ink);
+}
+
+.page-head .wordmark {
+  font-size: 1.35rem;
+}
+
+.seed {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.seed-main {
+  margin: auto;
+  width: 100%;
+  max-width: 620px;
+  padding: 4rem 0;
+}
+
+.seed-kicker {
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.seed .hero-row {
+  margin-top: 1.4rem;
+}
+
+.result {
+  padding-bottom: 6rem;
 }
 
 .seed-line {
   font-size: 0.85rem;
   letter-spacing: 0.06em;
   color: var(--muted);
-  margin-bottom: 2rem;
+  margin: 2.4rem 0 2rem;
 }
 
 .seed-line strong {
   color: var(--ink);
   font-weight: 500;
 }
+
+/* ---------------------------------------------------------------- sleeve */
 
 .sleeve {
   display: grid;
@@ -453,6 +539,59 @@ body {
   margin-bottom: 0.4rem;
 }
 
+.feedback-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.9rem;
+  margin-top: 1rem;
+  font-family: var(--grotesk);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+}
+
+.profile-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  color: var(--muted);
+  font-family: var(--grotesk);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+}
+
+.profile-control select {
+  border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  border-radius: 999px;
+  padding: 0.32rem 1.7rem 0.32rem 0.72rem;
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+}
+
+.feedback-label,
+.feedback-status {
+  color: var(--muted);
+}
+
+.feedback-btn {
+  border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  border-radius: 999px;
+  padding: 0.32rem 0.72rem;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.feedback-btn:hover,
+.feedback-btn[aria-pressed="true"] {
+  color: var(--paper);
+  background: var(--ink);
+}
+
 /* player */
 
 .player {
@@ -572,8 +711,7 @@ body {
 /* --------------------------------------------------------------- footer */
 
 .colophon {
-  margin-top: 4rem;
-  padding-top: 1.2rem;
+  padding: 1.2rem 0 1.6rem;
   border-top: 1px solid var(--ink);
   display: flex;
   flex-wrap: wrap;
@@ -588,6 +726,162 @@ body {
   color: inherit;
 }
 
+/* -------------------------------------------------------- view transitions */
+
+/* Shared elements: each name pairs one element on the cover with its
+   counterpart on the result page. Only one view is rendered at a time,
+   so the uniqueness rule holds. */
+
+.cover-wordmark,
+.page-head .wordmark {
+  view-transition-name: wordmark;
+}
+
+.search-wrap,
+.seed-line {
+  view-transition-name: seed;
+}
+
+.sleeve {
+  view-transition-name: sleeve;
+}
+
+::view-transition-group(wordmark),
+::view-transition-group(seed) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Entering the result page: the sleeve rises in. Leaving: it sinks away.
+   (Only one of old/new exists per direction, since the sleeve has no
+   counterpart on the cover.) */
+::view-transition-new(sleeve) {
+  animation: sleeve-in 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+::view-transition-old(sleeve) {
+  animation: sleeve-out 300ms ease both;
+}
+
+@keyframes sleeve-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+
+@keyframes sleeve-out {
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+/* ------------------------------------------------------------ scroll scrub */
+
+/* While a scroll gesture is scrubbing, the two neighbouring views are both
+   rendered and --p (0 = lower page, 1 = upper page, set per-frame by
+   scrub.js) drives the transition by hand. */
+
+.page.scrubbing .cover,
+.page.scrubbing .seed,
+.page.scrubbing .result {
+  pointer-events: none;
+}
+
+/* per-frame updates: promote the movers, and let the rail thumb track the
+   finger directly instead of lagging through its transition */
+.page.scrubbing .cover .tagline,
+.page.scrubbing .cover .hero-row,
+.page.scrubbing .cover .status-line,
+.page.scrubbing .cover .colophon,
+.page.scrubbing .seed-main,
+.page.scrubbing .seed-line,
+.page.scrubbing .sleeve {
+  will-change: transform, opacity;
+}
+
+.page.scrubbing ~ .rail .rail-thumb {
+  transition: none;
+}
+
+/* pair 0-1 : playlist cover -> seed search */
+
+.scrub-01 .cover {
+  position: relative;
+  z-index: 2;
+}
+
+.scrub-01 .cover .tagline,
+.scrub-01 .cover .hero-row,
+.scrub-01 .cover .status-line,
+.scrub-01 .cover .colophon {
+  opacity: calc(1 - var(--p, 0));
+}
+
+/* --dx/--dy/--s are the wordmark's FLIP geometry, measured per gesture */
+.scrub-01 .cover-wordmark {
+  transform-origin: left top;
+  transform: translate(calc(var(--dx, 0px) * var(--p, 0)), calc(var(--dy, 0px) * var(--p, 0)))
+    scale(calc(1 + (var(--s, 1) - 1) * var(--p, 0)));
+}
+
+.scrub-01 .seed .page-head .wordmark {
+  visibility: hidden;
+}
+
+.scrub-01 .seed .page-head {
+  border-bottom-color: color-mix(in srgb, var(--ink) calc(var(--p, 0) * 100%), transparent);
+}
+
+.scrub-01 .seed .page-head .text-link {
+  opacity: var(--p, 0);
+}
+
+/* the song box is the star: it arrives from deeper than the kicker */
+.scrub-01 .seed-kicker {
+  opacity: var(--p, 0);
+  transform: translateY(calc((1 - var(--p, 0)) * 28px));
+}
+
+.scrub-01 .seed .hero-row,
+.scrub-01 .seed .error-banner {
+  opacity: var(--p, 0);
+  transform: translateY(calc((1 - var(--p, 0)) * 56px));
+}
+
+/* pair 1-2 : seed search -> result sleeve */
+
+.scrub-12 .seed {
+  position: relative;
+  z-index: 2;
+}
+
+.scrub-12 .seed-main {
+  opacity: calc(1 - var(--p, 0));
+  transform: translateY(calc(var(--p, 0) * -32px));
+}
+
+.scrub-12 .seed .page-head .text-link {
+  opacity: calc(1 - var(--p, 0));
+}
+
+.scrub-12 .result .page-head {
+  border-bottom-color: transparent;
+}
+
+.scrub-12 .result .page-head .wordmark {
+  visibility: hidden;
+}
+
+.scrub-12 .result .page-head .text-link,
+.scrub-12 .seed-line,
+.scrub-12 .sleeve {
+  opacity: var(--p, 0);
+  transform: translateY(calc((1 - var(--p, 0)) * 44px));
+  transition: none;
+}
+
 /* ------------------------------------------------------------ responsive */
 
 @media (max-width: 720px) {
@@ -597,11 +891,6 @@ body {
 
   .sleeve-art-wrap {
     max-width: min(78vw, 380px);
-  }
-
-  .masthead {
-    flex-direction: column;
-    gap: 0.2rem;
   }
 }
 
@@ -614,5 +903,16 @@ body {
   .sleeve-art-wrap::before,
   .match-fill {
     transition: none;
+  }
+
+  .rail-thumb {
+    transition: none;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,7 @@ class RecommendationHit(Track):
     similarity_score: float
     rank_score: float
     explanation: dict
+    discovery: bool = False
 
 
 class HealthResponse(BaseModel):
@@ -60,12 +61,18 @@ class PlaylistSummary(BaseModel):
     resolved_tracks: int
     tracks_in_model: Optional[int] = None
     seed_in_model: Optional[bool] = None
+    engine_candidates: Optional[int] = None
+    playable_candidates: Optional[int] = None
+    engine_tracks_served: Optional[int] = None
+    fallback_tracks_served: Optional[int] = None
 
 
 class PlaylistRecommendationsRequest(BaseModel):
     tracks: List[PlaylistTrackInput] = Field(default_factory=list)  # optional: seed-only mode
     seed: Optional[str] = None
     limit: int = Field(5, ge=1, le=20)
+    session_id: Optional[str] = Field(None, min_length=8, max_length=64)
+    profile: Literal["familiar", "balanced", "explorer"] = "familiar"
 
 
 class PlaylistRecommendationsResponse(BaseModel):
@@ -77,6 +84,35 @@ class PlaylistRecommendationsResponse(BaseModel):
     request_id: str
     processing_time_ms: int
     playlist: PlaylistSummary
+    impression_id: str
+    profile: Literal["familiar", "balanced", "explorer"] = "familiar"
+
+
+class FeedbackRequest(BaseModel):
+    impression_id: str = Field(min_length=8, max_length=64)
+    track_id: str = Field(min_length=1, max_length=200)
+    event: Literal[
+        "view",
+        "dismiss",
+        "preview_start",
+        "preview_complete",
+        "like",
+        "neutral",
+        "dislike",
+        "open_spotify",
+        "open_apple",
+        "skip",
+        "replay",
+        "save",
+        "more_like_this",
+        "not_similar_enough",
+    ]
+    position: Optional[int] = Field(None, ge=0, le=1000)
+    dwell_ms: Optional[int] = Field(None, ge=0, le=3_600_000)
+
+
+class FeedbackResponse(BaseModel):
+    accepted: bool
 
 
 class PlaylistImportRequest(BaseModel):

@@ -258,3 +258,76 @@ def test_extension_track_passes_default_floor(embeddings, track_meta, audio_stor
     # audio cos ~1.0 to the seed: it must NOT be relegated to ineligible filler
     # (the old i2v floor pushed every extension track behind all 29 eligibles)
     assert ranks["dz:903"] < 29
+
+
+# ------------------------------------------------- discovery reservation
+
+
+def test_reserve_discovery_injects_and_caps(embeddings, track_meta, audio_store):
+    # The ranker demotes extension tracks (never training positives); discovery
+    # slots pull the closest on-vibe ones back into the served list, capped so
+    # they never take it over, and flag them for the UI.
+    from services.recommendation.policy import ScoringPolicy
+
+    engine = _engine_with_audio(embeddings, track_meta, audio_store)
+    engine.policy = ScoringPolicy(seed_affinity=0.0, discovery=0.0, floor=0.0)
+    ids = ["t00", "t01", "t02", "t03", "dz:1", "dz:2"]
+    X = pd.DataFrame({
+        "has_i2v": [1.0, 1.0, 1.0, 1.0, 0.0, 0.0],
+        "audio_cos_seed": [0.1, 0.1, 0.1, 0.1, 0.90, 0.80],
+    })
+    scores = np.array([5.0, 4.0, 3.0, 2.0, 1.0, 0.5])  # ranker buries the extension rows
+    order = np.argsort(-scores)
+
+    new_order, disc = engine._reserve_discovery(order, ids, X, scores, limit=4, has_seed=True)
+    picked = [ids[i] for i in new_order]
+
+    assert len(new_order) == 4
+    assert "dz:1" in picked                                   # closest extension injected
+    assert disc == {"dz:1", "dz:2"}                           # flagged for the UI
+    assert sum(p.startswith("dz:") for p in picked) <= 4 // 2  # capped at half the list
+
+
+def test_calibrated_acoustic_lane_reserves_top_audio_candidates(
+    embeddings, track_meta, audio_store
+):
+    from services.recommendation.acoustic import AcousticPolicy
+
+    engine = _engine_with_audio(embeddings, track_meta, audio_store)
+    engine.acoustic_policy = AcousticPolicy(
+        slots=2,
+        min_cos=0.2,
+        reciprocal_rank_weight=0.1,
+        extension_only=False,
+    )
+    ids = ["a", "b", "c", "d", "e"]
+    X = pd.DataFrame(
+        {
+            "has_i2v": [1.0] * 5,
+            "audio_cos_seed": [0.1, 0.2, 0.3, 0.9, 0.8],
+            "audio_seed_rr": [0.0, 0.0, 0.0, 0.5, 0.4],
+        }
+    )
+    scores = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
+    order = np.argsort(-scores)
+
+    new_order, discovery = engine._reserve_discovery(
+        order, ids, X, scores, limit=4, has_seed=True
+    )
+
+    assert {ids[i] for i in new_order} >= {"d", "e"}
+    assert discovery == {"d", "e"}
+
+
+def test_discovery_slots_zero_is_pure_ranking(embeddings, track_meta, audio_store):
+    from services.recommendation.acoustic import AcousticPolicy
+
+    engine = _engine_with_audio(embeddings, track_meta, audio_store)
+    engine.acoustic_policy = AcousticPolicy(slots=0)
+    ids = ["t00", "dz:1"]
+    X = pd.DataFrame({"has_i2v": [1.0, 0.0], "audio_cos_seed": [0.1, 0.99]})
+    scores = np.array([5.0, 0.1])
+    order = np.argsort(-scores)
+    new_order, disc = engine._reserve_discovery(order, ids, X, scores, limit=2, has_seed=True)
+    assert not disc                          # disabled: nothing force-injected
+    assert list(new_order) == list(order)    # ranker order untouched
