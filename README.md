@@ -75,8 +75,11 @@ Metrics are **end-to-end and unconditional**: queries whose positives never
 survive retrieval count as zero-scoring failures instead of being silently
 dropped (the usual way recommender metrics flatter themselves). Held-out
 playlists, leave-N-out, candidates from the exact serving retrieval path,
-scored through the exact serving policy — from `models/metrics.json`,
-survivor-conditional slice reproduced locally by
+scored through the exact serving policy. The figures below are recorded in
+[`evaluation/metrics_summary.json`](evaluation/metrics_summary.json), which
+pins them to the sha256 of the ranker and policy on the release; the training
+run's full `metrics.json` is training output and is not shipped with the
+serving release. Survivor-conditional slice reproduced locally by
 [`scripts/evaluate.py`](scripts/evaluate.py):
 
 | System (true end-to-end, test) | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
@@ -97,7 +100,7 @@ The serving policy is frozen on validation, not hand-tuned: a grid over the
 `SEED_AFFINITY` and `DISCOVERY` dials, constrained to keep seed similarity at
 parity with the previous system and popularity below its served level, trades
 ~1 point of raw NDCG@10 (0.168 → 0.156) for recommendations that stay close to
-the seed's sound and lean discovery. Ablations in `metrics.json` are honest:
+the seed's sound and lean discovery. The training run's ablations are honest:
 the audio and mood features are ranking-neutral on this test set (their value
 is audible, not measurable in NDCG), and a per-mode stagewise funnel
 attributes every lost positive to retrieval or a specific filter.
