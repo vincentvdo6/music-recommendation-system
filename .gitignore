@@ -56,3 +56,4 @@ data/*.sqlite3-*
 # Assistant config (local only)
 .claude/
 CLAUDE.md
+AGENTS.md
