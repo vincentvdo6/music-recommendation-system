@@ -110,7 +110,7 @@ attributes every lost positive to retrieval or a specific filter.
 
 ```bash
 pip install -r requirements.txt
-python scripts/download_models.py     # ~1.4 GB from the GitHub release
+python scripts/download_models.py     # ~1.8 GB from the GitHub release
 cp .env.example .env                  # add your Spotify client credentials
 python run_local.py                   # http://localhost:8000
 ```
@@ -143,7 +143,7 @@ a free GPU session (~3h). See [training/README.md](training/README.md).
 
 ```bash
 pytest -m "not slow"    # fast suite, fake model stack (runs in CI)
-pytest -m slow          # loads the real 2.3 GB artifacts, asserts the feature contract
+pytest -m slow          # loads the real ~1.8 GB artifacts, asserts the feature contract
 ```
 
 ## Stack
