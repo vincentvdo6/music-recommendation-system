@@ -12,7 +12,7 @@ static/ (vanilla ES modules, strict CSP)
   → services/recommendation/engine.py    (THE pipeline)
       retrieve (70% seed ANN / 30% playlist ANN, Annoy)
       → artist dedup → mood filter
-      → features.build_matrix (17 features, vectorized)
+      → features.build_matrix (20 features, vectorized)
       → ranker (LightGBM v2, LinearFallbackRanker if absent)
       → top-N + SHAP-style explanations
 ```

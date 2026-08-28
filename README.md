@@ -24,7 +24,7 @@ flowchart LR
 
     subgraph ENGINE_DETAIL ["services/recommendation"]
         RETRIEVE["ANN retrieval<br/>70% seed / 30% playlist<br/>(Annoy over item2vec)"]
-        FEATURES["17-feature matrix<br/>(vectorized, numpy)"]
+        FEATURES["20-feature matrix<br/>(vectorized, numpy)"]
         RANK["LightGBM LambdaRank<br/>(linear fallback)"]
         DIVERSITY["artist diversity<br/>+ mood filter"]
         RETRIEVE --> FEATURES --> RANK --> DIVERSITY
@@ -40,9 +40,10 @@ flowchart LR
 1. **Retrieval** — the searched song ("seed") drives 70% of the ~1,000-candidate
    pool via its Annoy neighbors; the playlist mean vector supplies the rest.
    Seeds outside the vocabulary fall back to a same-artist proxy track.
-2. **Ranking** — every candidate gets a 17-feature vector (seed/playlist
+2. **Ranking** — every candidate gets a 20-feature vector (seed/playlist
    cosines, ANN reciprocal ranks, item-NCF score, MPD popularity prior, artist
-   overlap, mood similarity, duration fit) scored by a LambdaRank model trained
+   overlap, mood similarity, duration fit, acoustic similarity and availability)
+   scored by a LambdaRank model trained
    on leave-N-out playlist continuation with **the exact serving retrieval**.
 3. **Diversity** — one track per artist, mood-filtered, then enriched with live
    Spotify metadata (artwork, previews, links).
