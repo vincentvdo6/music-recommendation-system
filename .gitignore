@@ -35,6 +35,10 @@ evaluation/*
 !evaluation/metrics_summary.json
 data/smpd/
 
+# Local SQLite runtime state (feedback/impression DB) — never commit
+data/*.sqlite3
+data/*.sqlite3-*
+
 # Large binary formats — never commit
 *.zip
 *.npy
