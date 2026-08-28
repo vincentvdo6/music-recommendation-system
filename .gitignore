@@ -32,6 +32,7 @@ nul
 models/
 evaluation/*
 !evaluation/calibration.json
+!evaluation/metrics_summary.json
 data/smpd/
 
 # Large binary formats — never commit

@@ -1,0 +1,74 @@
+{
+  "_comment": "Figures cited by the README's 'Offline evaluation' section, recorded for the shipped release. See provenance below for what this file is and is not.",
+  "provenance": {
+    "run": "v11 ranker + fixed-scale frozen policy",
+    "installed_in_commit": "6f84f9d",
+    "installed_on": "2026-07-12",
+    "artifacts": {
+      "release_tag": "v2.0.0",
+      "release_url": "https://github.com/vincentvdo6/music-recommendation-system/releases/tag/v2.0.0",
+      "lightgbm_ranker_v2.txt": {
+        "sha256": "ce10de72a43d6d373fa8fe0335bada4b784a9f2922a0b06d3203f25c4307d05a",
+        "n_features": 20
+      },
+      "policy.json": {
+        "sha256": "a92bdb45d316144479eb25e33624d1b15516e67baac1f4ea0505e54e67831b82",
+        "lam": 2.2,
+        "mu": 1.0,
+        "floor": 0.25,
+        "scale": "fixed"
+      }
+    },
+    "note": "Transcribed from the v11 training run's metrics.json, which was not preserved: models/ is gitignored, the release ships no metrics.json, and the local copy was overwritten by a later training run. This file is that record, not a regenerated one. The sha256 values above are of the artifacts on release v2.0.0, so a reader can confirm which model and policy these numbers describe.",
+    "eval_protocol": "Held-out playlists, leave-N-out, candidates from the exact serving retrieval path, scored through the exact serving policy. End-to-end and unconditional: queries whose positives never survive retrieval count as zero-scoring failures rather than being dropped."
+  },
+
+  "test": {
+    "this_release": {
+      "assisted": {
+        "ndcg@10": 0.156,
+        "recall@10": 0.110,
+        "recall@50": 0.209,
+        "hit@1": 0.229,
+        "mrr": 0.332
+      },
+      "seed_only": {
+        "ndcg@10": 0.184,
+        "recall@10": 0.034,
+        "recall@50": 0.089,
+        "hit@1": 0.286,
+        "mrr": 0.393
+      }
+    },
+    "previous_release_exact_served": {
+      "assisted": {
+        "ndcg@10": 0.108,
+        "recall@10": 0.075,
+        "recall@50": 0.131,
+        "hit@1": 0.161,
+        "mrr": 0.246
+      },
+      "seed_only": {
+        "ndcg@10": 0.154,
+        "recall@10": 0.029,
+        "recall@50": 0.069,
+        "hit@1": 0.217,
+        "mrr": 0.327
+      }
+    }
+  },
+
+  "release_gate": {
+    "_comment": "Paired bootstrap against the previous system served exactly as it ran.",
+    "metric": "ndcg@10",
+    "diff": 0.039,
+    "ci95": [0.036, 0.043],
+    "pass": true
+  },
+
+  "policy_freeze": {
+    "_comment": "Cost of the validation-frozen serving policy on the assisted slice: a grid over the SEED_AFFINITY and DISCOVERY dials, constrained to hold seed similarity at parity with the previous system and popularity below its served level.",
+    "no_policy_ndcg@10": 0.168,
+    "served_ndcg@10": 0.156
+  }
+}
