@@ -1,7 +1,7 @@
 """
 Download model artifacts from the GitHub release into models/.
 
-The repo ships no model weights; this fetches them (~1.4 GB total, the ANN
+The repo ships no model weights; this fetches them (~1.8 GB total, the ANN
 index dominating) so the app can serve real recommendations.
 
 Usage: python scripts/download_models.py [--tag v1.0.0]

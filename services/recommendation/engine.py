@@ -1,14 +1,19 @@
 """
 Recommendation engine: the one and only serving pipeline.
 
-    ANN retrieval (85% seed / 15% playlist)
-      -> artist pre-dedup (retrieval order, real artists)
-      -> mood filter (keep top 55% by similarity to the blended target mood)
+    ANN retrieval (70% seed / 30% playlist, or the whole pool from the
+      seed when there is no playlist; plus K_AUDIO audio-ANN candidates
+      when the seed has an audio vector)
+      -> artist pre-dedup (no-op while ARTIST_PRECAP is None)
+      -> mood filter (no-op while MOOD_KEEP_PCT is 1.0)
       -> vectorized feature matrix (features.FEATURE_NAMES)
       -> ranker (LightGBM LambdaRank, or linear fallback)
       -> top-N with per-track explanations
 
-The searched song ("seed") dominates: 70% of the candidate pool comes from
+Both hard filters stay in the call path but are disabled by default; the
+constants below carry the funnel measurements that turned them off.
+
+The searched song ("seed") dominates: 70% of the co-listen pool comes from
 its neighbors, its mood carries 80% of the target-mood blend, and
 seed_i2v_cos is the primary ranking feature. Display metadata (album art,
 preview URLs, live popularity) is attached later by the service layer via
