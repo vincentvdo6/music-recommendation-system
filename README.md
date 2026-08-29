@@ -1,10 +1,10 @@
 # One-Rec
 
-**Paste a playlist. Search a song. Get one great recommendation at a time.**
-
-A hybrid music recommendation engine serving 597K tracks — item2vec embeddings
-trained on the Spotify Million Playlist Dataset, ANN retrieval, and a LightGBM
-LambdaRank model over signals that actually exist at serving time.
+One-Rec is a hybrid music recommender over 597,682 tracks from the Spotify
+Million Playlist Dataset. You search for a track, optionally paste a playlist
+for context, and it returns a single song plus the features that put it there.
+Retrieval is an Annoy index over item2vec embeddings, and a LightGBM LambdaRank
+model does the final ordering.
 
 ![One-Rec UI](docs/ui-light.png)
 
@@ -15,98 +15,12 @@ LambdaRank model over signals that actually exist at serving time.
 
 </details>
 
-## How it works
+The MPD stops in 2017, so the catalog does too. A newer seed has no
+co-occurrence vector and resolves through a same-artist proxy, though if it has
+a preview clip it still gets its own audio vector (more on that below). There's
+no hosted demo either, because the serving artifacts come to ~1.8 GB.
 
-```mermaid
-flowchart LR
-    UI["One-Rec UI<br/>(vanilla JS, no framework)"] --> API["FastAPI"]
-    API --> ENGINE["Recommendation engine"]
-
-    subgraph ENGINE_DETAIL ["services/recommendation"]
-        RETRIEVE["ANN retrieval<br/>70% seed / 30% playlist<br/>(Annoy over item2vec)"]
-        FEATURES["20-feature matrix<br/>(vectorized, numpy)"]
-        RANK["LightGBM LambdaRank<br/>(linear fallback)"]
-        DIVERSITY["artist diversity<br/>+ mood filter"]
-        RETRIEVE --> FEATURES --> RANK --> DIVERSITY
-    end
-
-    ENGINE --> ENGINE_DETAIL
-    NCF["item-NCF<br/>(fold-in NeuMF)"] --> FEATURES
-    MOOD["mood predictor<br/>(from embeddings)"] --> FEATURES
-    META["track_meta.parquet<br/>(MPD popularity/artists)"] --> FEATURES
-    DIVERSITY --> SPOTIFY["Spotify metadata<br/>enrichment"]
-```
-
-1. **Retrieval** — the searched song ("seed") drives 70% of the ~1,000-candidate
-   pool via its Annoy neighbors; the playlist mean vector supplies the rest.
-   Seeds outside the vocabulary fall back to a same-artist proxy track.
-2. **Ranking** — every candidate gets a 20-feature vector (seed/playlist
-   cosines, ANN reciprocal ranks, item-NCF score, MPD popularity prior, artist
-   overlap, mood similarity, duration fit, acoustic similarity and availability)
-   scored by a LambdaRank model trained
-   on leave-N-out playlist continuation with **the exact serving retrieval**.
-3. **Diversity** — one track per artist, mood-filtered, then enriched with live
-   Spotify metadata (artwork, previews, links).
-
-Every recommendation ships its explanation — the top SHAP-style feature
-contributions — and the similarity shown in the UI is the real seed cosine,
-hidden when the seed isn't in the model rather than faked.
-
-### Honest-signals design
-
-Spotify deprecated its audio-features and recommendations APIs (403/404 for
-new apps), which silently killed most classic feature sets. Everything here is
-computable offline at serving time:
-
-| Signal | Source |
-|---|---|
-| Co-listen similarity | item2vec (200-dim, trained on 1M playlists) |
-| **Acoustic similarity** | Discogs-EffNet embeddings of 30s preview clips (46K tracks, PCA-256) — what songs actually *sound* like |
-| Collaborative score | item-NCF (fold-in NeuMF, BPR loss) — scores unseen playlists by mean-pooling |
-| Mood (valence/energy/…) | regression from item2vec embeddings, trained while the audio API existed |
-| Popularity prior, artists, durations | aggregated from the Million Playlist Dataset |
-
-A byte-identical feature spec is shared between serving and the training
-notebook, and the model loader refuses any artifact whose feature names don't
-match — training/serving drift fails loudly, at startup.
-
-## Offline evaluation
-
-Metrics are **end-to-end and unconditional**: queries whose positives never
-survive retrieval count as zero-scoring failures instead of being silently
-dropped (the usual way recommender metrics flatter themselves). Held-out
-playlists, leave-N-out, candidates from the exact serving retrieval path,
-scored through the exact serving policy. The figures below are recorded in
-[`evaluation/metrics_summary.json`](evaluation/metrics_summary.json), which
-pins them to the sha256 of the ranker and policy on the release; the training
-run's full `metrics.json` is training output and is not shipped with the
-serving release. Survivor-conditional slice reproduced locally by
-[`scripts/evaluate.py`](scripts/evaluate.py):
-
-| System (true end-to-end, test) | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
-|---|---|---|---|---|---|
-| **This release — with playlist context** | **0.156** | **0.110** | **0.209** | **0.229** | **0.332** |
-| **This release — seed-only** | **0.184** | **0.034** | **0.089** | **0.286** | **0.393** |
-| previous release, exact-served — with playlist | 0.108 | 0.075 | 0.131 | 0.161 | 0.246 |
-| previous release, exact-served — seed-only | 0.154 | 0.029 | 0.069 | 0.217 | 0.327 |
-
-The upgrade is gated on a paired bootstrap against the previous system served
-exactly as it ran: **+0.039 NDCG@10, 95% CI [+0.036, +0.043]** — the win comes
-from a wider, uncapped candidate funnel, not from grading on a curve. The
-single top recommendation is a held-out playlist track 23–29% of the time
-(Hit@1 matters here — the UI promises *one* great recommendation). Seed-only
-requests (no playlist context) are their own slice with their own funnel.
-
-The serving policy is frozen on validation, not hand-tuned: a grid over the
-`SEED_AFFINITY` and `DISCOVERY` dials, constrained to keep seed similarity at
-parity with the previous system and popularity below its served level, trades
-~1 point of raw NDCG@10 (0.168 → 0.156) for recommendations that stay close to
-the seed's sound and lean discovery. The training run's ablations are honest:
-the audio and mood features are ranking-neutral on this test set (their value
-is audible, not measurable in NDCG), and a per-mode stagewise funnel
-attributes every lost positive to retrieval or a specific filter.
-
-## Running it
+## Quick start
 
 ```bash
 pip install -r requirements.txt
@@ -115,20 +29,162 @@ cp .env.example .env                  # add your Spotify client credentials
 python run_local.py                   # http://localhost:8000
 ```
 
-Or with Docker (models stay volume-mounted, never baked into the image):
+Spotify credentials come from a free [developer app](https://developer.spotify.com/dashboard).
+Nothing Spotify returns feeds the ranker - it's search and display metadata
+only - though tracks Spotify can't identify do get dropped from the final list,
+and the service refills from the next-best candidates when that happens.
+
+There's also a compose file, which volume-mounts the models so they stay out of
+the image:
 
 ```bash
 docker compose up --build
 ```
 
-Spotify credentials come from a free [developer app](https://developer.spotify.com/dashboard)
-and are only used for search + display metadata.
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph ENGINE ["services/recommendation"]
+        direction TB
+        SEED["item2vec ANN<br/>70% seed / 30% playlist"]
+        AUD["audio ANN<br/>age-blind, K=4000"]
+        FEAT["20-feature matrix<br/>(vectorized numpy)"]
+        RANK["LightGBM LambdaRank<br/>(linear fallback)"]
+        SEED --> FEAT
+        AUD --> FEAT
+        FEAT --> RANK
+    end
+
+    UI["One-Rec UI<br/>(vanilla ES modules)"] --> API["FastAPI"]
+    API --> SEED
+
+    NCF["item-NCF<br/>(fold-in NeuMF)"] --> FEAT
+    MOOD["mood predictor<br/>(from embeddings)"] --> FEAT
+    META["track_meta.parquet<br/>(MPD popularity/artists)"] --> FEAT
+
+    RANK --> SVC["services/music<br/>Spotify enrichment<br/>+ one track per artist"]
+```
+
+**Retrieval.** Your seed track's nearest neighbours in the Annoy index fill
+about 700 of a 1,000-candidate pool and the mean vector of your playlist fills
+the rest. With no playlist, the seed takes all 1,000. There's a second channel
+on top of that: if the seed has an audio vector, another 4,000 candidates come
+from the audio index. That channel is age-blind, which is the point - it reaches
+tracks that have no co-occurrence vector at all, so a 2023 release can surface
+for a 2015 seed. It has to go 4,000 deep to do it, because in calibration the
+tracks a human would actually accept as a swap sat around audio rank 3.5-4K out
+of 65K. Ranking 5,000 rows is a few milliseconds, so the depth is free.
+
+One detail that took me a while to notice: the seed gets stripped out of its own
+playlist context before any features are computed. Otherwise "fits the playlist"
+partly restates "is the seed," and the model learns to trust a feature that is
+really just measuring itself.
+
+**Ranking.** Every candidate becomes a 20-feature vector: seed and playlist
+cosines, ANN reciprocal ranks, an item-NCF score, a popularity prior, and
+thirteen more listed in `features.py`. A LambdaRank model scores them. It was
+trained on leave-N-out playlist continuation against the same retrieval code
+that runs in production, so the candidates it learned to sort look like the ones
+it actually sees.
+
+**Diversity.** The service takes one track per artist after Spotify enrichment.
+Both hard filters that used to live in the engine are off now. In the funnel
+measurements, capping artists before the ranker cost more candidate recall than
+it bought, and so did vetoing on mood, which earns only about 2% of model gain
+in the first place. The ranker sees everything and `mood_sim` handles coherence
+as a feature.
+
+**Explanations.** Each recommendation carries its top feature contributions,
+from LightGBM's `pred_contrib`. The similarity percentage in the UI is the seed
+co-listen cosine straight out of the model - the proxy's, when the seed itself
+is out of vocabulary - and the field hides itself rather than showing a number
+when that cosine is near zero.
+
+When an optional subsystem is missing, its features collapse to a constant
+across the whole candidate set: 0 for scores and indicators, 0.5 for mood diffs.
+A constant column can't reorder anything within a query, so the app degrades to
+a smaller model instead of a wrong one. The startup log prints a capability
+table saying which artifacts actually loaded.
+
+### Where the signals come from
+
+Spotify deprecated its audio-features and recommendations endpoints, and new
+apps now get a 403 or 404 from both. That removes most of the feature set you'd
+find in a recommender tutorial. Everything below is computed offline, so nothing
+in the ranking path depends on an endpoint that can vanish.
+
+| Signal | Source |
+|---|---|
+| Co-listen similarity | item2vec, 200-dim, trained on 1M playlists |
+| Acoustic similarity | Discogs-EffNet embeddings of 30s preview clips, PCA-256 |
+| Collaborative score | item-NCF (fold-in NeuMF, BPR loss), mean-pools unseen playlists |
+| Mood (valence/energy/...) | regression from item2vec embeddings, trained while the audio API still worked |
+| Popularity prior, artists, durations | aggregated from the Million Playlist Dataset |
+
+The acoustic feature only covers 46K of the 597K tracks, since it needs a
+preview clip that still resolves. Everything else covers the full catalog.
+
+## Benchmarks
+
+Held-out playlists, leave-N-out. Candidates come from the same retrieval path
+the API uses and are scored through the same policy, so these are end-to-end
+numbers and not ranker-only ones. They're also unconditional: dropping the
+queries whose held-out track never survives retrieval is the easy way to make a
+recommender look better than it is, so those queries stay in and score zero.
+
+| System (end-to-end, test) | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
+|---|---|---|---|---|---|
+| this release, with playlist context | 0.156 | 0.110 | 0.209 | 0.229 | 0.332 |
+| this release, seed-only | 0.184 | 0.034 | 0.089 | 0.286 | 0.393 |
+| previous release, exact-served, with playlist | 0.108 | 0.075 | 0.131 | 0.161 | 0.246 |
+| previous release, exact-served, seed-only | 0.154 | 0.029 | 0.069 | 0.217 | 0.327 |
+
+I gated the upgrade on a paired bootstrap: +0.039 NDCG@10, 95% CI [+0.036,
++0.043]. The baseline there is the previous system rerun through this harness,
+not its published numbers. Most of the gain came from widening the candidate
+funnel.
+
+Hit@1 is the column I care about, since the UI only ever shows one track. The
+single recommendation is a held-out playlist track 23-29% of the time. Seed-only
+requests are their own slice with their own funnel.
+
+The figures above are pinned in
+[`evaluation/metrics_summary.json`](evaluation/metrics_summary.json) to the
+sha256 of the ranker and policy in the release, and
+[`scripts/evaluate.py`](scripts/evaluate.py) reproduces them locally.
+
+The serving policy is frozen on validation. I swept the `SEED_AFFINITY` and
+`DISCOVERY` dials under two constraints: seed similarity at parity with the
+previous system, popularity below its served level. The winning setting costs
+about a point of raw NDCG@10, 0.168 down to 0.156, which I took because the
+results stay closer to the seed's sound and lean toward tracks you probably
+haven't heard.
+
+The ablations also turned up a disappointment. The audio and mood features are
+ranking-neutral on this test set. You can hear what they do; NDCG can't see it.
+
+## Contracts
+
+The feature spec exists twice, once in the serving path and once in the training
+notebook, and a test fails if the two copies differ by a byte. The ranker loader
+compares `model.feature_name()` against that spec and refuses to load on a
+mismatch. I'd rather a stale 17-name model fail at startup than drift quietly
+into a metrics dashboard.
+
+| Path | What's there |
+|---|---|
+| `services/recommendation/engine.py` | the whole serving pipeline, retrieval through explanations |
+| `services/recommendation/features.py` | `FEATURE_NAMES`, the contract shared with training |
+| `services/recommendation/factory.py` | artifact loading and the capability table |
+| `services/music/service.py` | playlist resolution, Spotify enrichment, artist dedup |
+| `training/kaggle_train_ranker.ipynb` | the training pipeline |
 
 ## Training
 
-The full pipeline — MPD parsing, item-NCF training, ranker dataset
-construction, LambdaRank training, evaluation — runs in one Kaggle notebook on
-a free GPU session (~3h). See [training/README.md](training/README.md).
+The whole pipeline runs in one Kaggle notebook on a free GPU session, roughly
+three hours: MPD parsing, item-NCF training, ranker dataset construction,
+LambdaRank training, evaluation. See [training/README.md](training/README.md).
 
 ## API
 
@@ -148,6 +204,20 @@ pytest -m slow          # loads the real ~1.8 GB artifacts, asserts the feature 
 
 ## Stack
 
-FastAPI · gensim (item2vec) · Annoy · LightGBM · PyTorch (optional, lazy) ·
-pandas/pyarrow · vanilla ES-module frontend with a strict CSP (no frameworks,
-no inline scripts, self-hosted fonts).
+FastAPI, gensim, Annoy, LightGBM, PyTorch, pandas/pyarrow, scikit-learn. Torch
+is imported lazily and the app runs without it, but it's in `requirements.txt`
+either way. The frontend is plain ES modules under a strict CSP, with
+self-hosted fonts and no framework.
+
+The numpy<2 pin is load-bearing for the gensim and annoy ABIs. If you bump it,
+things break in ways that don't look like a numpy problem.
+
+## Data and license
+
+The code here is MIT licensed. The training data isn't mine to license: it's the
+[Spotify Million Playlist Dataset](https://www.aicrowd.com/challenges/spotify-million-playlist-dataset-challenge),
+released for non-commercial, open research use, and both the dataset and the
+artifacts derived from it stay subject to Spotify's terms. The model release
+includes MPD-derived metadata, so treat the whole serving set as research use
+only and not as something to build a product on. To retrain from scratch you'll
+need to accept those terms and pull the MPD yourself.
