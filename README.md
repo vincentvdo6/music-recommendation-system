@@ -127,42 +127,59 @@ preview clip that still resolves. Everything else covers the full catalog.
 
 ## Benchmarks
 
-Held-out playlists, leave-N-out. Candidates come from the same retrieval path
-the API uses and are scored through the same policy, so these are end-to-end
-numbers and not ranker-only ones. They're also unconditional: dropping the
-queries whose held-out track never survives retrieval is the easy way to make a
-recommender look better than it is, so those queries stay in and score zero.
+The recorded evaluation protocol used held-out playlists with leave-N-out.
+Candidates came from the API's retrieval path and were scored through the same
+policy. It specified end-to-end, unconditional scoring: queries whose held-out
+tracks did not survive retrieval counted as zero rather than being dropped.
+
+**Historical results, not independently reproduced.** The table and paired-bootstrap
+result below were transcribed from the v11 training run, whose original
+`metrics.json` was not preserved. They remain a record of that run, not an
+independently reproduced benchmark.
 
 | System (end-to-end, test) | NDCG@10 | Recall@10 | Recall@50 | Hit@1 | MRR |
 |---|---|---|---|---|---|
-| this release, with playlist context | 0.156 | 0.110 | 0.209 | 0.229 | 0.332 |
-| this release, seed-only | 0.184 | 0.034 | 0.089 | 0.286 | 0.393 |
+| v2.0.0 release, with playlist context | 0.156 | 0.110 | 0.209 | 0.229 | 0.332 |
+| v2.0.0 release, seed-only | 0.184 | 0.034 | 0.089 | 0.286 | 0.393 |
 | previous release, exact-served, with playlist | 0.108 | 0.075 | 0.131 | 0.161 | 0.246 |
 | previous release, exact-served, seed-only | 0.154 | 0.029 | 0.069 | 0.217 | 0.327 |
 
-I gated the upgrade on a paired bootstrap: +0.039 NDCG@10, 95% CI [+0.036,
-+0.043]. The baseline there is the previous system rerun through this harness,
-not its published numbers. Most of the gain came from widening the candidate
-funnel.
+The recorded release gate was a paired-bootstrap difference of +0.039 NDCG@10,
+95% CI [+0.036, +0.043]. Its baseline was the previous system rerun through the
+historical harness, not its published numbers. The run attributed most of the
+gain to a wider candidate funnel.
 
-Hit@1 is the column I care about, since the UI only ever shows one track. The
-single recommendation is a held-out playlist track 23-29% of the time. Seed-only
-requests are their own slice with their own funnel.
+Hit@1 is the column I care about, since the UI only ever shows one track. In
+those recorded results, the single recommendation was a held-out playlist track
+23-29% of the time. Seed-only requests were their own slice with their own funnel.
 
-The figures above are pinned in
-[`evaluation/metrics_summary.json`](evaluation/metrics_summary.json) to the
-sha256 of the ranker and policy in the release, and
-[`scripts/evaluate.py`](scripts/evaluate.py) reproduces them locally.
+[`evaluation/metrics_summary.json`](evaluation/metrics_summary.json) retains the
+transcribed figures and the SHA-256 hashes of the v2.0.0 ranker and policy. The
+hashes identify those artifacts; they do not verify the scores or confidence
+interval.
 
-The serving policy is frozen on validation. I swept the `SEED_AFFINITY` and
-`DISCOVERY` dials under two constraints: seed similarity at parity with the
-previous system, popularity below its served level. The winning setting costs
-about a point of raw NDCG@10, 0.168 down to 0.156, which I took because the
-results stay closer to the seed's sound and lean toward tracks you probably
-haven't heard.
+[`scripts/evaluate.py`](scripts/evaluate.py) runs local comparisons on an exported
+held-out candidate sample using the installed ranker and policy. It skips groups
+with no positive labels and does not simulate Spotify-availability losses or the
+final one-track-per-artist rule. Its results are therefore conditional on the
+surviving sample, not the unconditional end-to-end results in the historical
+table. It also does not compute the paired-bootstrap result above. New results
+depend on the evaluation sample and model/policy artifacts supplied.
 
-The ablations also turned up a disappointment. The audio and mood features are
-ranking-neutral on this test set. You can hear what they do; NDCG can't see it.
+The [training notebook](training/kaggle_train_ranker.ipynb) tracks original
+positive counts and dropped queries for end-to-end scoring. It can support new
+measurements, but it does not recover the missing historical run output.
+
+The historical run froze the serving policy on validation. I swept the
+`SEED_AFFINITY` and `DISCOVERY` dials under two constraints: seed similarity at
+parity with the previous system, popularity below its served level. The recorded
+winning setting cost about a point of raw NDCG@10, 0.168 down to 0.156, which I
+took because the results stayed closer to the seed's sound and leaned toward
+tracks you probably haven't heard.
+
+The historical ablations also reported a disappointment: the audio and mood
+features were ranking-neutral on that test set. You can hear what they do; NDCG
+couldn't see it in that run.
 
 ## Contracts
 
